@@ -7,6 +7,8 @@ The UrbanDictionaryAR Backend serves as the server-side component of the UrbanDi
 - **Nest.js**: A progressive Node.js framework for building efficient, reliable, and scalable server-side applications.
 - **MySQL**: A popular open-source relational database management system used for storing and managing data.
 - **TypeORM**: An Object-Relational Mapping (ORM) library for TypeScript and JavaScript that simplifies database interactions.
+- **Node.js**: A JavaScript runtime environment for building server-side and networking applications.
+- **REST API**: Follows the Representational State Transfer architectural style for designing networked applications.
 
 ## Setup Instructions
 1. Clone the repository: `git clone <repository-url>`
@@ -54,7 +56,7 @@ The database schema for UrbanDictionaryAR consists of the following tables:
 - **WordReports**: Tracks reports for words, including the reason for reporting and the user who reported it.
 
 ## Contributors
-- [Your Name](https://github.com/your-username)
+- [Anthony Elkommos Youssef](https://github.com/anthonyyoussef01)
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Mozilla Public License Version 2.0 - see the [LICENSE](LICENSE) file for details.
