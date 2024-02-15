@@ -11,7 +11,6 @@ import * as process from 'process';
 
 dotenv.config();
 
-console.log('PORT', process.env.PORT);
 @Module({
   imports: [
     TypeOrmModule.forRoot({
