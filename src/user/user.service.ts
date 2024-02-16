@@ -16,6 +16,10 @@ export class UserService {
     return 'This action adds a new user';
   }
 
+  findAll(): Promise<User[]> {
+    return this.userRepository.find();
+  }
+
   findOne(id: number) {
     return `This action returns a #${id} user`;
   }
