@@ -20,7 +20,7 @@ export class User {
   @Column()
   password: string;
 
-  @Column()
+  @Column({ nullable: true })
   dateOfBirth: Date;
 
   @Column({ nullable: true, type: 'blob' })
