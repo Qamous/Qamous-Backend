@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
-import { Repository } from 'typeorm';
-import { CreateUserParams } from '../../../utils/types';
+import { Repository, UpdateResult } from 'typeorm';
+import { CreateUserParams, UpdateUserParams } from '../../../utils/types';
+import { UpdateUserDto } from '../../controllers/dtos/update-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -20,5 +21,12 @@ export class UsersService {
       createdAt: new Date(),
     });
     return this.usersRepository.save(newUser);
+  }
+
+  updateUser(
+    id: number,
+    updateUserDetails: Omit<UpdateUserDto, 'passwordConfirmation'>,
+  ): Promise<UpdateResult> {
+    return this.usersRepository.update({ id }, { ...updateUserDetails });
   }
 }
