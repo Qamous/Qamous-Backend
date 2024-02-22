@@ -39,7 +39,10 @@ export class UsersController {
     // TODO: add validation for password and other fields
     const { passwordConfirmation, ...userDetails } = createUserDto;
     if (passwordConfirmation !== userDetails.password) {
-      throw new Error('Password confirmation does not match password');
+      throw new HttpException(
+        'Password confirmation does not match password',
+        HttpStatus.BAD_REQUEST,
+      );
     }
     return this.usersService.createUser(userDetails);
   }
