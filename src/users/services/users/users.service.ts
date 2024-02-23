@@ -29,4 +29,8 @@ export class UsersService {
   ): Promise<UpdateResult> {
     return this.usersRepository.update({ id }, { ...updateUserDetails });
   }
+
+  async deleteUser(id: number) {
+    return this.usersRepository.delete({ id });
+  }
 }
