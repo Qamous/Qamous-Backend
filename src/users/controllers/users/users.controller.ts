@@ -7,8 +7,8 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
-  Put,
 } from '@nestjs/common';
 import { CreateUserDto } from '../dtos/create-user.dto';
 import { UsersService } from '../../services/users/users.service';
@@ -29,13 +29,18 @@ export class UsersController {
     return await this.usersService.findUsers();
   }
 
+  @Get(':id')
+  async getUserById(@Param('id', ParseIntPipe) id: number): Promise<User> {
+    return await this.usersService.findUserById(id);
+  }
+
   /*
    * This is a POST request to /users that creates a new user
    *
    * @param {CreateUserDto} createUserDto - a CreateUserDto object that contains the details of the new user
    * @returns {Promise<User>} - the newly created User object
    */
-  @Post()
+  @Post('register')
   createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: add validation for password and other fields
     const { passwordConfirmation, ...userDetails } = createUserDto;
@@ -55,7 +60,7 @@ export class UsersController {
    * @param {UpdateUserDto} updateUserDto - an UpdateUserDto object that contains the details of the user to update
    * @returns {Promise<void>} - a Promise that resolves to void
    */
-  @Put(':id')
+  @Patch(':id')
   async updateUserById(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
