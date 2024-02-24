@@ -40,10 +40,10 @@ The UrbanDictionaryAR Backend serves as the server-side component of the UrbanDi
 - **POST /word/add**: Add a new word to the dictionary.
 - **GET /word/{wordID}**: Get details of a specific word.
 - **GET /search/iso={countryCode}**: Get a list of words used in a specific country.
-- **GET /word/kwd={keyword}**: Search for words containing a specific keyword.
+- **GET /search/kwd={keyword}**: Search for words containing a specific keyword.
 
 ### Definition Management
-- **POST /definitions**: Add a new definition to a word.
+- **POST /definition/{wordID}**: Add a new definition to a word.
 - **GET /definitions/{definitionID}**: Get details of a specific definition.
 - **POST /definitions/{definitionID}/like**: Like a definition.
 - **POST /definitions/{definitionID}/dislike**: Dislike a definition.
