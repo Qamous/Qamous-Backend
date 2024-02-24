@@ -37,9 +37,10 @@ The UrbanDictionaryAR Backend serves as the server-side component of the UrbanDi
 - **DELETE /users/{userID}**: Delete a user account.
 
 ### Word Management
-- **POST /words**: Add a new word to the dictionary.
-- **GET /words/{wordID}**: Get details of a specific word.
-- **GET /words/search**: Search for words by keyword or filter by country of use.
+- **POST /word/add**: Add a new word to the dictionary.
+- **GET /word/{wordID}**: Get details of a specific word.
+- **GET /search/iso={countryCode}**: Get a list of words used in a specific country.
+- **GET /word/kwd={keyword}**: Search for words containing a specific keyword.
 
 ### Definition Management
 - **POST /definitions**: Add a new definition to a word.
