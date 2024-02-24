@@ -1,7 +1,7 @@
-# UrbanDictionaryAR Backend
+# Qamous Backend
 
 ## Description
-The UrbanDictionaryAR Backend serves as the server-side component of the UrbanDictionaryAR application, which is a platform for users to contribute and explore definitions of Arabic and Franco-Arabic words. The backend is responsible for handling user authentication, word and definition management, as well as user interactions such as liking, disliking, and reporting definitions.
+The Qamous Backend serves as the server-side component of the Qamous application, which is a platform for users to contribute and explore definitions of Arabic and Franco-Arabic words. The backend is responsible for handling user authentication, word and definition management, as well as user interactions such as liking, disliking, and reporting definitions.
 
 ## Technologies Used
 - **Nest.js**: A progressive Node.js framework for building efficient, reliable, and scalable server-side applications.
