@@ -31,8 +31,10 @@ The UrbanDictionaryAR Backend serves as the server-side component of the UrbanDi
 ### User Management
 - **POST /users/register**: Register a new user.
 - **POST /users/login**: Authenticate a user and generate a JWT token.
+- **GET /users**: Get a list of all users.
 - **GET /users/{userID}**: Get user profile information.
 - **PATCH /users/{userID}**: Update user profile information.
+- **DELETE /users/{userID}**: Delete a user account.
 
 ### Word Management
 - **POST /words**: Add a new word to the dictionary.

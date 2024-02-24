@@ -54,7 +54,7 @@ export class UsersController {
   }
 
   /*
-   * This is a PUT request to /users/:id that updates a user by their id
+   * This is a PATCH request to /users/:id that updates a user by their id
    *
    * @param {number} id - the id of the user to update
    * @param {UpdateUserDto} updateUserDto - an UpdateUserDto object that contains the details of the user to update
