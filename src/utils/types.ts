@@ -9,7 +9,6 @@ export type CreateUserParams = {
 };
 
 export type UpdateUserParams = {
-  id: number;
   firstName: string;
   lastName: string;
   email: string;
