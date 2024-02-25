@@ -1,6 +1,7 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { CountriesService } from '../../services/countries/countries.service';
 import { Country } from '../../../typeorm/entities/country';
+import { CreateCountryDto } from '../../dtos/create-country.dto';
 
 @Controller('countries')
 export class CountriesController {
@@ -27,5 +28,12 @@ export class CountriesController {
     @Param('countryCode') countryCode: string,
   ): Promise<Country> {
     return this.countriesService.getCountryByCode(countryCode);
+  }
+
+  @Post('register')
+  async registerCountry(
+    @Body() createCountryDto: CreateCountryDto,
+  ): Promise<Country> {
+    return this.countriesService.createCountry(createCountryDto);
   }
 }

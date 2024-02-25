@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Country } from '../../../typeorm/entities/country';
+import { CreateCountryDto } from '../../dtos/create-country.dto';
+import { CreateCountryParams } from '../../../utils/types';
 
 @Injectable()
 export class CountriesService {
@@ -27,5 +29,11 @@ export class CountriesService {
    */
   async getCountryByCode(countryCode: string): Promise<Country> {
     return this.countriesRepository.findOne({ where: { countryCode } });
+  }
+
+  async createCountry(createCountryDto: CreateCountryParams): Promise<Country> {
+    const newCountry = this.countriesRepository.create(createCountryDto);
+    await this.countriesRepository.save(newCountry);
+    return newCountry;
   }
 }
