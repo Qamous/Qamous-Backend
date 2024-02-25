@@ -10,10 +10,10 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { CreateUserDto } from '../dtos/create-user.dto';
+import { CreateUserDto } from '../../dtos/create-user.dto';
 import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
-import { UpdateUserDto } from '../dtos/update-user.dto';
+import { UpdateUserDto } from '../../dtos/update-user.dto';
 
 @Controller('users')
 export class UsersController {

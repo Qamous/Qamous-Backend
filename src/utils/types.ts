@@ -18,3 +18,13 @@ export type UpdateUserParams = {
   dateOfBirth: Date;
   createdAt: Date;
 };
+
+export type CreateCountryParams = {
+  countryCode: string;
+  countryName: string;
+};
+
+export type UpdateCountryParams = {
+  countryCode: string;
+  countryName: string;
+};
