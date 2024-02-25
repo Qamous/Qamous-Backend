@@ -30,6 +30,13 @@ export class CountriesController {
     return this.countriesService.getCountryByCode(countryCode);
   }
 
+  /*
+   * This is a POST request to /countries/register that creates a new country
+   *
+   * @param {CreateCountryDto} createCountryDto - a CreateCountryDto object that contains the
+   * details of the new country
+   * @returns {Promise<Country>} - the newly created Country object
+   */
   @Post('register')
   async registerCountry(
     @Body() createCountryDto: CreateCountryDto,
