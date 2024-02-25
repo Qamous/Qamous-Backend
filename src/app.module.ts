@@ -6,6 +6,7 @@ import * as dotenv from 'dotenv';
 import * as process from 'process';
 import { User } from './typeorm/entities/user';
 import { UsersModule } from './users/users.module';
+import { Country } from './typeorm/entities/country';
 
 dotenv.config();
 
@@ -18,7 +19,7 @@ dotenv.config();
       username: process.env.USER,
       password: process.env.PASSWORD,
       database: process.env.DATABASE,
-      entities: [User],
+      entities: [User, Country],
       synchronize: true,
     }),
     UsersModule,
