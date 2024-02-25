@@ -31,6 +31,13 @@ export class CountriesService {
     return this.countriesRepository.findOne({ where: { countryCode } });
   }
 
+  /*
+   * This creates a new country
+   *
+   * @param {CreateCountryParams} createCountryDto - a CreateCountryParams object that contains the
+   * details of the new country
+   * @returns {Promise<Country>} - the newly created Country object
+   */
   async createCountry(createCountryDto: CreateCountryParams): Promise<Country> {
     const newCountry = this.countriesRepository.create(createCountryDto);
     await this.countriesRepository.save(newCountry);
