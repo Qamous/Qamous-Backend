@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
 import { DeleteResult, Repository, UpdateResult } from 'typeorm';
 import { CreateUserParams, UpdateUserParams } from '../../../utils/types';
+import { passwordHashing } from '../../../utils/password-hashing';
 
 @Injectable()
 export class UsersService {
