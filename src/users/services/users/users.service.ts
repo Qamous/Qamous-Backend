@@ -28,6 +28,7 @@ export class UsersService {
    */
   createUser(userDetails: CreateUserParams): Promise<User> {
     const newUser = this.usersRepository.create({
+      password: passwordHashing(userDetails.password),
       ...userDetails,
       createdAt: new Date(),
     });
