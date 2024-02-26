@@ -43,6 +43,14 @@ export class CountriesService {
     return newCountry;
   }
 
+  /*
+   * This updates a country by its code
+   *
+   * @param {string} countryCode - the code of the country to update
+   * @param {UpdateCountryParams} updateCountryDto - an UpdateCountryParams object that contains the
+   * details of the country to replace the existing country
+   * @returns {Promise<UpdateResult>} - the update result
+   */
   async updateCountry(
     countryCode: string,
     updateCountryDto: UpdateCountryParams,
