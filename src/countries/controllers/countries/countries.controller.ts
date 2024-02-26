@@ -1,8 +1,16 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { CountriesService } from '../../services/countries/countries.service';
 import { Country } from '../../../typeorm/entities/country';
 import { CreateCountryDto } from '../../dtos/create-country.dto';
-import { UpdateResult } from 'typeorm';
+import { DeleteResult, UpdateResult } from 'typeorm';
 
 @Controller('countries')
 export class CountriesController {
@@ -59,5 +67,18 @@ export class CountriesController {
     @Body() updateCountryDto: CreateCountryDto,
   ): Promise<UpdateResult> {
     return this.countriesService.updateCountry(countryCode, updateCountryDto);
+  }
+
+  /*
+   * This is a DELETE request to /countries/:countryCode that deletes a country by its code
+   *
+   * @param {string} countryCode - the code of the country to delete
+   * @returns {Promise<DeleteResult>} - the delete result
+   */
+  @Delete(':countryCode')
+  async deleteCountry(
+    @Param('countryCode') countryCode: string,
+  ): Promise<DeleteResult> {
+    return this.countriesService.deleteCountry(countryCode);
   }
 }
