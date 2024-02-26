@@ -7,6 +7,9 @@ import * as process from 'process';
 import { User } from './typeorm/entities/user';
 import { UsersModule } from './users/users.module';
 import { Country } from './typeorm/entities/country';
+import { WordsModule } from './words/words.module';
+import { DefinitionsModule } from './definitions/definitions.module';
+import { CountriesModule } from './countries/countries.module';
 
 dotenv.config();
 
@@ -23,6 +26,9 @@ dotenv.config();
       synchronize: true,
     }),
     UsersModule,
+    CountriesModule,
+    WordsModule,
+    DefinitionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
