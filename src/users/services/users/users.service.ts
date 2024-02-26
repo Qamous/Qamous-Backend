@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
 import { Repository, UpdateResult } from 'typeorm';
@@ -43,11 +43,20 @@ export class UsersService {
    * @param {UpdateUserParams} updateUserDetails - the details of the user to update
    * @returns {Promise<UpdateResult>} - the update result
    */
-  updateUser(
+  async updateUser(
     id: number,
     updateUserDetails: UpdateUserParams,
   ): Promise<UpdateResult> {
-    return this.usersRepository.update({ id }, { ...updateUserDetails });
+    const result = await this.usersRepository.update(
+      { id },
+      { ...updateUserDetails },
+    );
+
+    if (result.affected === 0) {
+      throw new HttpException('User not found', 404);
+    }
+
+    return result;
   }
 
   /*

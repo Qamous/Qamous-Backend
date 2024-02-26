@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, UpdateResult } from 'typeorm';
 import { Country } from '../../../typeorm/entities/country';
-import { CreateCountryParams } from '../../../utils/types';
+import { CreateCountryParams, UpdateCountryParams } from '../../../utils/types';
 
 @Injectable()
 export class CountriesService {
@@ -41,5 +41,21 @@ export class CountriesService {
     const newCountry = this.countriesRepository.create(createCountryDto);
     await this.countriesRepository.save(newCountry);
     return newCountry;
+  }
+
+  async updateCountry(
+    countryCode: string,
+    updateCountryDto: UpdateCountryParams,
+  ): Promise<UpdateResult> {
+    const result = await this.countriesRepository.update(
+      { countryCode },
+      updateCountryDto,
+    );
+
+    if (result.affected === 0) {
+      throw new HttpException('Country not found', 404);
+    }
+
+    return result;
   }
 }
