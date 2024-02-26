@@ -14,7 +14,7 @@ import { CreateUserDto } from '../../dtos/create-user.dto';
 import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
-import { UpdateResult } from 'typeorm';
+import { DeleteResult, UpdateResult } from 'typeorm';
 
 @Controller('users')
 export class UsersController {
@@ -30,6 +30,12 @@ export class UsersController {
     return await this.usersService.findUsers();
   }
 
+  /*
+   * This is a GET request to /users/:id that returns a user by their id
+   *
+   * @param {number} id - the id of the user to return
+   * @returns {Promise<User>} - the User object with the specified id
+   */
   @Get(':id')
   async getUserById(@Param('id', ParseIntPipe) id: number): Promise<User> {
     return await this.usersService.findUserById(id);
@@ -77,8 +83,16 @@ export class UsersController {
     return await this.usersService.updateUser(id, newUserDetails);
   }
 
+  /*
+   * This is a DELETE request to /users/:id that deletes a user by their id
+   *
+   * @param {number} id - the id of the user to delete
+   * @returns {Promise<DeleteResult>} - the delete result
+   */
   @Delete(':id')
-  async deleteUserById(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    await this.usersService.deleteUser(id);
+  async deleteUserById(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<DeleteResult> {
+    return await this.usersService.deleteUser(id);
   }
 }
