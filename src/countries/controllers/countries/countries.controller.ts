@@ -45,6 +45,14 @@ export class CountriesController {
     return this.countriesService.createCountry(createCountryDto);
   }
 
+  /*
+   * This is a PATCH request to /countries/:countryCode that updates a country by its code
+   *
+   * @param {string} countryCode - the code of the country to update
+   * @param {CreateCountryDto} updateCountryDto - a CreateCountryDto object that contains the
+   * details of the country to replace the existing country
+   * @returns {Promise<UpdateResult>} - the update result
+   */
   @Patch(':countryCode')
   async updateCountry(
     @Param('countryCode') countryCode: string,
