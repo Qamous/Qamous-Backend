@@ -39,6 +39,9 @@ The Qamous Backend serves as the server-side component of the Qamous application
 ### Countries Management
 - **GET /countries**: Retrieve all countries from the database.
 - **GET /countries/:countryCode**: Retrieve a specific country by its ISO code.
+- **POST /countries**: Add a new country to the database.
+- **PATCH /countries/:countryCode**: Update an existing country.
+- **DELETE /countries/:countryCode**: Delete a country from the database.
 
 ### Word Management
 - **POST /word/add**: Add a new word to the dictionary.
