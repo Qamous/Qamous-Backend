@@ -14,6 +14,7 @@ import { CreateUserDto } from '../../dtos/create-user.dto';
 import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
+import { UpdateResult } from 'typeorm';
 
 @Controller('users')
 export class UsersController {
@@ -58,13 +59,13 @@ export class UsersController {
    *
    * @param {number} id - the id of the user to update
    * @param {UpdateUserDto} updateUserDto - an UpdateUserDto object that contains the details of the user to update
-   * @returns {Promise<void>} - a Promise that resolves to void
+   * @returns {Promise<UpdateResult>} - the update result
    */
   @Patch(':id')
   async updateUserById(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
-  ): Promise<void> {
+  ): Promise<UpdateResult> {
     // TODO: add validation for password and other fields
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
     if (passwordConfirmation !== newUserDetails.password) {
@@ -73,7 +74,7 @@ export class UsersController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    await this.usersService.updateUser(id, newUserDetails);
+    return await this.usersService.updateUser(id, newUserDetails);
   }
 
   @Delete(':id')
