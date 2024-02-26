@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { CountriesService } from '../../services/countries/countries.service';
 import { Country } from '../../../typeorm/entities/country';
 import { CreateCountryDto } from '../../dtos/create-country.dto';
@@ -42,5 +42,13 @@ export class CountriesController {
     @Body() createCountryDto: CreateCountryDto,
   ): Promise<Country> {
     return this.countriesService.createCountry(createCountryDto);
+  }
+
+  @Patch(':countryCode')
+  async updateCountry(
+    @Param('countryCode') countryCode: string,
+    @Body() updateCountryDto: CreateCountryDto,
+  ): Promise<Country> {
+    return this.countriesService.updateCountry(countryCode, updateCountryDto);
   }
 }
