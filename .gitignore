@@ -60,4 +60,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /data-scraping/
 
 # sensitive or environment-specific data
-src/utils/password-hashing.ts
+!/src/utils/password-hashing.ts
