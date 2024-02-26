@@ -8,7 +8,7 @@ CREATE TABLE Users
     FullName       TEXT,
     ProfilePicture TEXT,          -- Store the URL or reference to the profile picture
     DateOfBirth    DATE,
-    LikesReceived  INT DEFAULT 0  -- Count of likes received on definitions by other users
+    LikesReceived  INT DEFAULT 0, -- Count of likes received on definitions by other users
     CountryCode    CHAR(2),       -- ISO 3166-1 alpha-2 country code
     FOREIGN KEY (CountryCode) REFERENCES Countries (CountryCode)
 );
