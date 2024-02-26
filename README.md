@@ -54,8 +54,9 @@ interactions.
 ### Word Management
 - **POST /word/add**: Add a new word to the dictionary.
 - **GET /word/{wordID}**: Get details of a specific word.
-- **GET /search/iso={countryCode}**: Get a list of words used in a specific country.
-- **GET /search/kwd={keyword}**: Search for words containing a specific keyword.
+- **GET /word/search/all**: Get a list of all words in the dictionary.
+- **GET /word/search/iso={countryCode}**: Get a list of words used in a specific country.
+- **GET /word/search/kwd={keyword}**: Search for words containing a specific keyword.
 
 ### Definition Management
 - **POST /definition/{wordID}**: Add a new definition to a word.
