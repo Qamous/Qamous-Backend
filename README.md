@@ -9,6 +9,7 @@ The Qamous Backend serves as the server-side component of the Qamous application
 - **TypeORM**: An Object-Relational Mapping (ORM) library for TypeScript and JavaScript that simplifies database interactions.
 - **Node.js**: A JavaScript runtime environment for building server-side and networking applications.
 - **REST API**: Follows the Representational State Transfer architectural style for designing networked applications.
+- Might wanna use **Passport.js** and **Express** Session
 
 ## Setup Instructions
 1. Clone the repository: `git clone <repository-url>`
