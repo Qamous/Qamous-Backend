@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { CountriesService } from '../../services/countries/countries.service';
 import { Country } from '../../../typeorm/entities/country';
 import { CreateCountryDto } from '../../dtos/create-country.dto';
+import { UpdateResult } from 'typeorm';
 
 @Controller('countries')
 export class CountriesController {
@@ -48,7 +49,7 @@ export class CountriesController {
   async updateCountry(
     @Param('countryCode') countryCode: string,
     @Body() updateCountryDto: CreateCountryDto,
-  ): Promise<Country> {
+  ): Promise<UpdateResult> {
     return this.countriesService.updateCountry(countryCode, updateCountryDto);
   }
 }
