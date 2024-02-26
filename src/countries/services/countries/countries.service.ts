@@ -66,4 +66,14 @@ export class CountriesService {
 
     return result;
   }
+
+  /*
+   * This deletes a country by its code
+   *
+   * @param {string} countryCode - the code of the country to delete
+   * @returns {Promise<UpdateResult>} - the delete result
+   */
+  deleteCountry(countryCode: string) {
+    return this.countriesRepository.delete({ countryCode });
+  }
 }
