@@ -1,7 +1,7 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
-import { Repository, UpdateResult } from 'typeorm';
+import { DeleteResult, Repository, UpdateResult } from 'typeorm';
 import { CreateUserParams, UpdateUserParams } from '../../../utils/types';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
 
@@ -65,7 +65,7 @@ export class UsersService {
    * @param {number} id - the id of the user to delete
    * @returns {Promise<DeleteResult>} - the delete result
    */
-  async deleteUser(id: number) {
+  async deleteUser(id: number): Promise<DeleteResult> {
     return this.usersRepository.delete({ id });
   }
 
@@ -75,7 +75,7 @@ export class UsersService {
    * @param {number} id - the id of the user to return
    * @returns {Promise<User>} - the User object with the specified id
    */
-  async findUserById(id: number) {
+  async findUserById(id: number): Promise<User> {
     return this.usersRepository.findOne({
       where: { id },
     });
