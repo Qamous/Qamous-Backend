@@ -27,7 +27,7 @@ export class WordsController {
    */
   @Get(':wordID')
   getWordById(@Param('wordID') wordID: number): Promise<Word> {
-    return this.wordsService.getWordById(wordID);
+    return this.wordsService.findWordById(wordID);
   }
 
   /**
@@ -37,7 +37,7 @@ export class WordsController {
    */
   @Get('search/all')
   getWords(): Promise<Word[]> {
-    return this.wordsService.getWords();
+    return this.wordsService.findWords();
   }
 
   /**
