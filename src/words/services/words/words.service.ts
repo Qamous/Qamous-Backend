@@ -31,7 +31,7 @@ export class WordsService {
    * @param {number} id - the id of the word to return
    * @returns {Promise<Word>} - the Word object with the specified id
    */
-  getWordById(id: number): Promise<Word> {
+  findWordById(id: number): Promise<Word> {
     return this.wordsRepository.findOne({
       where: { id },
     });
@@ -42,7 +42,7 @@ export class WordsService {
    *
    * @returns {Promise<Word[]>} - an array of all Word objects
    */
-  getWords(): Promise<Word[]> {
+  findWords(): Promise<Word[]> {
     return this.wordsRepository.find();
   }
 
