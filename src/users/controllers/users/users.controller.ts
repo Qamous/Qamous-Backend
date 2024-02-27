@@ -20,7 +20,7 @@ import { DeleteResult, UpdateResult } from 'typeorm';
 export class UsersController {
   constructor(private usersService: UsersService) {}
 
-  /*
+  /**
    * This is a GET request to /users that returns all users
    *
    * @returns {Promise<User[]>} - an array of User objects
@@ -30,7 +30,7 @@ export class UsersController {
     return await this.usersService.findUsers();
   }
 
-  /*
+  /**
    * This is a GET request to /users/:id that returns a user by their id
    *
    * @param {number} id - the id of the user to return
@@ -41,7 +41,7 @@ export class UsersController {
     return await this.usersService.findUserById(id);
   }
 
-  /*
+  /**
    * This is a POST request to /users that creates a new user
    *
    * @param {CreateUserDto} createUserDto - a CreateUserDto object that contains the details of the new user
@@ -60,7 +60,7 @@ export class UsersController {
     return this.usersService.createUser(userDetails);
   }
 
-  /*
+  /**
    * This is a PATCH request to /users/:id that updates a user by their id
    *
    * @param {number} id - the id of the user to update
@@ -83,7 +83,7 @@ export class UsersController {
     return await this.usersService.updateUser(id, newUserDetails);
   }
 
-  /*
+  /**
    * This is a DELETE request to /users/:id that deletes a user by their id
    *
    * @param {number} id - the id of the user to delete
