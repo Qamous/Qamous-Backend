@@ -17,12 +17,12 @@ export class WordsService {
    * @param {Partial<Word>} wordDetails - the details of the new word
    * @returns {Promise<Word>} - the newly created Word object
    */
-  addWord(wordDetails: CreateWordParams): Promise<Word> {
+  async addWord(wordDetails: CreateWordParams): Promise<Word> {
     const newWord = this.wordsRepository.create({
       ...wordDetails,
       createdAt: new Date(),
     });
-    return this.wordsRepository.save(newWord);
+    return await this.wordsRepository.save(newWord);
   }
 
   /**
@@ -31,8 +31,8 @@ export class WordsService {
    * @param {number} id - the id of the word to return
    * @returns {Promise<Word>} - the Word object with the specified id
    */
-  findWordById(id: number): Promise<Word> {
-    return this.wordsRepository.findOne({
+  async findWordById(id: number): Promise<Word> {
+    return await this.wordsRepository.findOne({
       where: { id },
     });
   }
@@ -42,8 +42,8 @@ export class WordsService {
    *
    * @returns {Promise<Word[]>} - an array of all Word objects
    */
-  findWords(): Promise<Word[]> {
-    return this.wordsRepository.find();
+  async findWords(): Promise<Word[]> {
+    return await this.wordsRepository.find();
   }
 
   /**
