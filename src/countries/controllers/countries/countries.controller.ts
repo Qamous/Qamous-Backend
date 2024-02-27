@@ -16,7 +16,7 @@ import { DeleteResult, UpdateResult } from 'typeorm';
 export class CountriesController {
   constructor(private readonly countriesService: CountriesService) {}
 
-  /*
+  /**
    * This is a GET request to /countries that returns all countries
    *
    * @returns {Promise<Country[]>} - an array of Country objects
@@ -26,7 +26,7 @@ export class CountriesController {
     return this.countriesService.getAllCountries();
   }
 
-  /*
+  /**
    * This is a GET request to /countries/:countryCode that returns a country by its code
    *
    * @param {string} countryCode - the code of the country to return
@@ -39,7 +39,7 @@ export class CountriesController {
     return this.countriesService.getCountryByCode(countryCode);
   }
 
-  /*
+  /**
    * This is a POST request to /countries/register that creates a new country
    *
    * @param {CreateCountryDto} createCountryDto - a CreateCountryDto object that contains the
@@ -53,7 +53,7 @@ export class CountriesController {
     return this.countriesService.createCountry(createCountryDto);
   }
 
-  /*
+  /**
    * This is a PATCH request to /countries/:countryCode that updates a country by its code
    *
    * @param {string} countryCode - the code of the country to update
@@ -69,7 +69,7 @@ export class CountriesController {
     return this.countriesService.updateCountry(countryCode, updateCountryDto);
   }
 
-  /*
+  /**
    * This is a DELETE request to /countries/:countryCode that deletes a country by its code
    *
    * @param {string} countryCode - the code of the country to delete

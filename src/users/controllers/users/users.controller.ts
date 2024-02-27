@@ -48,7 +48,7 @@ export class UsersController {
    * @returns {Promise<User>} - the newly created User object
    */
   @Post('register')
-  createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
+  async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: add validation for password and other fields
     const { passwordConfirmation, ...userDetails } = createUserDto;
     if (passwordConfirmation !== userDetails.password) {
@@ -57,7 +57,7 @@ export class UsersController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.usersService.createUser(userDetails);
+    return await this.usersService.createUser(userDetails);
   }
 
   /**

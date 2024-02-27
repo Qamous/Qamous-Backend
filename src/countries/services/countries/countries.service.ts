@@ -1,17 +1,16 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, UpdateResult } from 'typeorm';
+import { DeleteResult, Repository, UpdateResult } from 'typeorm';
 import { Country } from '../../../typeorm/entities/country';
 import { CreateCountryParams, UpdateCountryParams } from '../../../utils/types';
 
 @Injectable()
 export class CountriesService {
   constructor(
-    @InjectRepository(Country)
-    private countriesRepository: Repository<Country>,
+    @InjectRepository(Country) private countriesRepository: Repository<Country>,
   ) {}
 
-  /*
+  /**
    * This returns all countries
    *
    * @returns {Promise<Country[]>} - an array of all Country objects
@@ -20,7 +19,7 @@ export class CountriesService {
     return this.countriesRepository.find();
   }
 
-  /*
+  /**
    * This returns a country by its code
    *
    * @param {string} countryCode - the code of the country to return
@@ -30,7 +29,7 @@ export class CountriesService {
     return this.countriesRepository.findOne({ where: { countryCode } });
   }
 
-  /*
+  /**
    * This creates a new country
    *
    * @param {CreateCountryParams} createCountryDto - a CreateCountryParams object that contains the
@@ -43,7 +42,7 @@ export class CountriesService {
     return newCountry;
   }
 
-  /*
+  /**
    * This updates a country by its code
    *
    * @param {string} countryCode - the code of the country to update
@@ -67,13 +66,13 @@ export class CountriesService {
     return result;
   }
 
-  /*
+  /**
    * This deletes a country by its code
    *
    * @param {string} countryCode - the code of the country to delete
    * @returns {Promise<UpdateResult>} - the delete result
    */
-  deleteCountry(countryCode: string) {
-    return this.countriesRepository.delete({ countryCode });
+  async deleteCountry(countryCode: string): Promise<DeleteResult> {
+    return await this.countriesRepository.delete({ countryCode });
   }
 }

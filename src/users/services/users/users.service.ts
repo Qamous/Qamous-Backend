@@ -16,8 +16,8 @@ export class UsersService {
    *
    * @returns {Promise<User[]>} - an array of all User objects
    */
-  findUsers(): Promise<User[]> {
-    return this.usersRepository.find();
+  async findUsers(): Promise<User[]> {
+    return await this.usersRepository.find();
   }
 
   /**
@@ -27,13 +27,13 @@ export class UsersService {
    * @param {CreateUserParams} userDetails - the details of the new user
    * @returns {Promise<User>} - the newly created User object
    */
-  createUser(userDetails: CreateUserParams): Promise<User> {
+  async createUser(userDetails: CreateUserParams): Promise<User> {
     const newUser = this.usersRepository.create({
       password: passwordHashing(userDetails.password),
       ...userDetails,
       createdAt: new Date(),
     });
-    return this.usersRepository.save(newUser);
+    return await this.usersRepository.save(newUser);
   }
 
   /**
