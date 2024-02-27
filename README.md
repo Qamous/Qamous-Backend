@@ -59,8 +59,11 @@ interactions.
 - **GET /word/search/kwd={keyword}**: Search for words containing a specific keyword.
 
 ### Definition Management
-- **POST /definition/{wordID}**: Add a new definition to a word.
+- **GET /definitions**: Get a list of all definitions.
 - **GET /definitions/{definitionID}**: Get details of a specific definition.
+- **POST /definitions/{wordID}**: Add a new definition to a word.
+- **PATCH /definitions/{definitionID}**: Update an existing definition.
+- **DELETE /definitions/{definitionID}**: Delete a definition.
 - **POST /definitions/{definitionID}/like**: Like a definition.
 - **POST /definitions/{definitionID}/dislike**: Dislike a definition.
 - **POST /definitions/{definitionID}/report**: Report a definition.
