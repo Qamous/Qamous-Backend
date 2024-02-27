@@ -11,7 +11,7 @@ export class UsersService {
     @InjectRepository(User) private usersRepository: Repository<User>,
   ) {}
 
-  /*
+  /**
    * This returns all users
    *
    * @returns {Promise<User[]>} - an array of all User objects
@@ -20,7 +20,7 @@ export class UsersService {
     return this.usersRepository.find();
   }
 
-  /*
+  /**
    * This creates a new user according to the details provided in the CreateUserParams object
    * and returns the newly created user
    *
@@ -36,7 +36,7 @@ export class UsersService {
     return this.usersRepository.save(newUser);
   }
 
-  /*
+  /**
    * This updates a user according to the details provided in the UpdateUserParams object
    * and returns the update result
    *
@@ -60,7 +60,7 @@ export class UsersService {
     return result;
   }
 
-  /*
+  /**
    * This deletes a user by their id
    *
    * @param {number} id - the id of the user to delete
@@ -70,7 +70,7 @@ export class UsersService {
     return this.usersRepository.delete({ id });
   }
 
-  /*
+  /**
    * This returns a user by their id
    *
    * @param {number} id - the id of the user to return
