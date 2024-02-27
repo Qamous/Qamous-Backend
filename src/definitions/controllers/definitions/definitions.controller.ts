@@ -27,8 +27,7 @@ export class DefinitionsController {
     return this.definitionsService.getDefinitionById(id);
   }
 
-  // TODO: does this work?
-  @Post(':word')
+  @Post()
   async createDefinition(
     @Body() createDefinitionDto: CreateDefinitionDto,
   ): Promise<Definition> {

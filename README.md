@@ -61,7 +61,7 @@ interactions.
 ### Definition Management
 - **GET /definitions**: Get a list of all definitions.
 - **GET /definitions/{definitionID}**: Get details of a specific definition.
-- **POST /definitions/{wordID}**: Add a new definition to a word.
+- **POST /definitions**: Add a new definition to a word.
 - **PATCH /definitions/{definitionID}**: Update an existing definition.
 - **DELETE /definitions/{definitionID}**: Delete a definition.
 - **POST /definitions/{definitionID}/like**: Like a definition.
