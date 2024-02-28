@@ -10,6 +10,8 @@ import { Country } from './typeorm/entities/country';
 import { WordsModule } from './words/words.module';
 import { DefinitionsModule } from './definitions/definitions.module';
 import { CountriesModule } from './countries/countries.module';
+import { DefinitionLikesDislikesModule } from './definition-likes-dislikes/definition-likes-dislikes.module';
+import { WordReportsModule } from './word-reports/word-reports.module';
 
 dotenv.config();
 
@@ -29,6 +31,8 @@ dotenv.config();
     CountriesModule,
     WordsModule,
     DefinitionsModule,
+    DefinitionLikesDislikesModule,
+    WordReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
