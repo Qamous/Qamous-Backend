@@ -3,7 +3,8 @@ export class UpdateUserDto {
   lastName: string;
   email: string;
   username: string;
-  password: string;
+  oldPassword: string;
+  newPassword: string;
   passwordConfirmation: string;
   dateOfBirth: Date;
   createdAt: Date;
