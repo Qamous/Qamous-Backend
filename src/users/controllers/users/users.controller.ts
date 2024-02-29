@@ -54,13 +54,9 @@ export class UsersController {
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: add validation for password and other fields
+
     const { passwordConfirmation, ...userDetails } = createUserDto;
-    if (passwordConfirmation !== userDetails.password) {
-      throw new HttpException(
-        'Password confirmation does not match password',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    this.passwordConfirmation(passwordConfirmation, userDetails.password);
     return await this.usersService.createUser(userDetails);
   }
 
@@ -78,15 +74,26 @@ export class UsersController {
   ): Promise<UpdateResult> {
     // make sure old password is correct
     await this.verifyOldPassword(id, updateUserDto);
+
     // TODO: add validation for password and other fields
+
+    delete updateUserDto.oldPassword;
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
-    if (passwordConfirmation !== newUserDetails.newPassword) {
+    this.passwordConfirmation(passwordConfirmation, newUserDetails.password);
+    return await this.usersService.updateUser(id, newUserDetails);
+  }
+
+  private passwordConfirmation(
+    passwordConfirmation: string,
+    password: string,
+  ): void {
+    if (passwordConfirmation !== password) {
       throw new HttpException(
         'Password confirmation does not match password',
         HttpStatus.BAD_REQUEST,
       );
     }
-    return await this.usersService.updateUser(id, newUserDetails);
+    return;
   }
 
   /**
@@ -116,6 +123,8 @@ export class UsersController {
           'Old password is incorrect',
           HttpStatus.BAD_REQUEST,
         );
+      } else {
+        return;
       }
     } else {
       throw new HttpException(

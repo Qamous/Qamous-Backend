@@ -4,7 +4,7 @@ export class UpdateUserDto {
   email: string;
   username: string;
   oldPassword: string;
-  newPassword: string;
+  password: string;
   passwordConfirmation: string;
   dateOfBirth: Date;
   createdAt: Date;
