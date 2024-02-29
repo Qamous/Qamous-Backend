@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
 import { DeleteResult, Repository, UpdateResult } from 'typeorm';
 import { CreateUserParams, UpdateUserParams } from '../../../utils/types';
-import { passwordHashing } from '../../../../safe/password-hashing';
+import { newPasswordHashing } from '../../../../safe/new-password-hashing';
 
 @Injectable()
 export class UsersService {
@@ -28,7 +28,7 @@ export class UsersService {
    * @returns {Promise<User>} - the newly created User object
    */
   async createUser(userDetails: CreateUserParams): Promise<User> {
-    const hashedPassword = passwordHashing(userDetails.password);
+    const hashedPassword = newPasswordHashing(userDetails.password);
     const newUser = this.usersRepository.create({
       password: hashedPassword[0],
       salt: hashedPassword[1],

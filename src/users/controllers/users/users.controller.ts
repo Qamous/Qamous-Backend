@@ -15,6 +15,10 @@ import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
+import {
+  newPasswordHashing,
+  verifyPassword,
+} from '../../../../safe/new-password-hashing';
 
 @Controller('users')
 export class UsersController {
@@ -72,15 +76,53 @@ export class UsersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
   ): Promise<UpdateResult> {
+    // make sure old password is correct
+    await this.verifyOldPassword(id, updateUserDto);
     // TODO: add validation for password and other fields
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
-    if (passwordConfirmation !== newUserDetails.password) {
+    if (passwordConfirmation !== newUserDetails.newPassword) {
       throw new HttpException(
         'Password confirmation does not match password',
         HttpStatus.BAD_REQUEST,
       );
     }
     return await this.usersService.updateUser(id, newUserDetails);
+  }
+
+  /**
+   * This is a helper function that verifies the old password and throws an error if it is incorrect or missing.
+   * It is used in the updateUserById method.
+   *
+   * @param {number} id - the id of the user to update
+   * @param {UpdateUserDto} updateUserDto - an UpdateUserDto object that contains the details of the user to update
+   * @returns {Promise<void>} - nothing
+   * @private
+   */
+  private async verifyOldPassword(
+    id: number,
+    updateUserDto: UpdateUserDto,
+  ): Promise<void> {
+    if (updateUserDto.oldPassword) {
+      const user: User = await this.usersService.findUserById(id);
+      // if old password is incorrect, throw an error
+      if (
+        !verifyPassword(
+          user.hashedPassword,
+          updateUserDto.oldPassword,
+          user.salt,
+        )
+      ) {
+        throw new HttpException(
+          'Old password is incorrect',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    } else {
+      throw new HttpException(
+        'Old password is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
   }
 
   /**
