@@ -15,7 +15,10 @@ import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
-import { verifyPassword } from '../../../../safe/new-password-hashing';
+import {
+  isPasswordSecure,
+  verifyPassword,
+} from '../../../../safe/new-password-hashing';
 
 @Controller('users')
 export class UsersController {
@@ -50,7 +53,9 @@ export class UsersController {
    */
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
-    // TODO: add validation for password and other fields
+    // validation TODO: put all the validation in a separate function once done
+    isPasswordSecure(createUserDto.password);
+    // TODO: add validation for other fields
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
     this.passwordConfirmation(passwordConfirmation, userDetails.password);
@@ -72,7 +77,9 @@ export class UsersController {
     // make sure old password is correct
     await this.verifyOldPassword(id, updateUserDto);
 
-    // TODO: add validation for password and other fields
+    // validation
+    isPasswordSecure(updateUserDto.password);
+    // TODO: add validation for other fields
 
     delete updateUserDto.oldPassword;
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
