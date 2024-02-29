@@ -18,8 +18,11 @@ export class User {
   @Column({ unique: true })
   username: string;
 
-  @Column()
-  password: string;
+  @Column({ nullable: false })
+  hashedPassword: string;
+
+  @Column({ nullable: false })
+  salt: string;
 
   @Column({ nullable: true })
   dateOfBirth: Date;
