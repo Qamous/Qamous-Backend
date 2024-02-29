@@ -15,10 +15,7 @@ import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
-import {
-  newPasswordHashing,
-  verifyPassword,
-} from '../../../../safe/new-password-hashing';
+import { verifyPassword } from '../../../../safe/new-password-hashing';
 
 @Controller('users')
 export class UsersController {
@@ -83,6 +80,15 @@ export class UsersController {
     return await this.usersService.updateUser(id, newUserDetails);
   }
 
+  /**
+   * This is a helper function that verifies the password confirmation and throws an error if it is incorrect.
+   * It is used in the createUser and updateUserById methods.
+   *
+   * @param {string} passwordConfirmation - the password confirmation to verify
+   * @param {string} password - the password to compare the password confirmation to
+   * @returns {void} - nothing
+   * @private
+   */
   private passwordConfirmation(
     passwordConfirmation: string,
     password: string,
