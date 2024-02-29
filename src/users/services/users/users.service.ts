@@ -35,6 +35,8 @@ export class UsersService {
       ...userDetails,
       createdAt: new Date(),
     });
+    newUser['hashedPassword'] = newUser['password'];
+    delete newUser['password'];
     return await this.usersRepository.save(newUser);
   }
 
