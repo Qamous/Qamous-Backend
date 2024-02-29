@@ -35,8 +35,12 @@ export class UsersService {
       ...userDetails,
       createdAt: new Date(),
     });
+
+    // This is not very clean,
+    // but it essentially renames CreateUserParams.password to hashedPassword for the User object
     newUser['hashedPassword'] = newUser['password'];
     delete newUser['password'];
+
     return await this.usersRepository.save(newUser);
   }
 
