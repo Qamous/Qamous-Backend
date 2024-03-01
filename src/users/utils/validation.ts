@@ -12,7 +12,75 @@ import { UpdateUserDto } from '../dtos/update-user.dto';
  * @returns {void} - nothing
  */
 export function validateFields(userDTO: CreateUserDto | UpdateUserDto): void {
+  isNameValid(userDTO.firstName, userDTO.lastName);
+  isEmailValid(userDTO.email);
+  isUsernameValid(userDTO.username);
   isPasswordSecure(userDTO.password, userDTO.firstName, userDTO.username);
+  // Date of birth is optional
+  if (userDTO.dateOfBirth) {
+    isDateValid(userDTO.dateOfBirth);
+  }
+  return;
+}
+
+/**
+ * This function validates that the user's name is valid and throws an error if it is not.
+ * A valid name must:
+ * - not be empty
+ * - be at most 100 characters long
+ *
+ * @param {string} firstName - the first name to validate
+ * @param {string} lastName - the last name to validate
+ * @returns {void} - nothing
+ */
+function isNameValid(firstName: string, lastName: string): void {
+  if (!firstName || !lastName || firstName === '' || lastName === '') {
+    throw new Error('First name and last name are required');
+  }
+  if (firstName.length > 100) {
+    throw new Error('First name is too long');
+  }
+  if (lastName.length > 100) {
+    throw new Error('Last name is too long');
+  }
+  return;
+}
+
+/**
+ * This function validates that an email is valid and throws an error if it is not.
+ *
+ * @param {string} email - the email to validate
+ * @returns {void} - nothing
+ */
+function isEmailValid(email: string): void {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    throw new Error('Email is not valid');
+  }
+  return;
+}
+
+/**
+ * This function validates that a username is valid and throws an error if it is not.
+ * A valid username must:
+ * - not be empty
+ * - be at most 100 characters long
+ * - not contain spaces
+ *
+ * @param {string} username - the username to validate
+ * @returns {void} - nothing
+ */
+function isUsernameValid(username: string): void {
+  if (!username || username === '') {
+    throw new Error('Username is required');
+  }
+  if (username.length > 100) {
+    throw new Error('Username is too long');
+  }
+  if (username.includes(' ')) {
+    throw new Error('Username must not contain spaces');
+  }
+  return;
 }
 
 /**
@@ -86,6 +154,23 @@ function isPasswordSecure(
     case isNotCommonPassword:
       throw new Error(password + ' is a common password');
   }
+  return;
+}
 
+/**
+ * This function validates that a date is valid and throws an error if it is not.
+ * A valid date must:
+ * - be over 3 years ago
+ *
+ * @param {Date} date - the date to validate
+ * @returns {void} - nothing
+ */
+function isDateValid(date: Date): void {
+  const threeYearsAgo = new Date();
+  threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3);
+  // If the date is not over 3 years ago, throw an error
+  if (date > threeYearsAgo) {
+    throw new Error('Date must be over 3 years ago');
+  }
   return;
 }
