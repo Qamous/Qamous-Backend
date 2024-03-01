@@ -1,3 +1,7 @@
+export function validateFields(password: string, firstName: string): void {
+  isPasswordSecure(password, firstName);
+}
+
 /**
  * This function validates that a password is secure and throws an error if it is not.
  * A secure password must:
@@ -16,7 +20,7 @@
  * @param {string} firstName - the first name of the user
  * @returns {void} - nothing
  */
-export function isPasswordSecure(password: string, firstName: string): void {
+function isPasswordSecure(password: string, firstName: string): void {
   const hasUpperCase = /[A-Z]/.test(password);
   const hasLowerCase = /[a-z]/.test(password);
   const hasNumber = /\d/.test(password);
