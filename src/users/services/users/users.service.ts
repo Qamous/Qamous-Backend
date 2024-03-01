@@ -28,7 +28,10 @@ export class UsersService {
    * @returns {Promise<User>} - the newly created User object
    */
   async createUser(userDetails: CreateUserParams): Promise<User> {
-    const hashedPassword = newPasswordHashing(userDetails.password);
+    const hashedPassword = newPasswordHashing(
+      userDetails.password,
+      userDetails.firstName,
+    );
     const newUser = this.usersRepository.create({
       password: hashedPassword[0],
       salt: hashedPassword[1],
