@@ -61,6 +61,7 @@ CREATE TABLE DefinitionLikesDislikes
     FOREIGN KEY (UserID) REFERENCES Users (UserID)
 );
 
+-- Create a table to store reports for words
 CREATE TABLE WordReports
 (
     ReportID   INT PRIMARY KEY AUTO_INCREMENT,
