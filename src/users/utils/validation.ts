@@ -8,17 +8,17 @@ import { UpdateUserDto } from '../dtos/update-user.dto';
 /**
  * This function validates the fields of a user and throws an error if they are invalid.
  *
- * @param {CreateUserDto | UpdateUserDto} userDTO - the fields of the user to validate
+ * @param {CreateUserDto | UpdateUserDto} userDto - the fields of the user to validate
  * @returns {void} - nothing
  */
-export function validateFields(userDTO: CreateUserDto | UpdateUserDto): void {
-  isNameValid(userDTO.firstName, userDTO.lastName);
-  isEmailValid(userDTO.email);
-  isUsernameValid(userDTO.username);
-  isPasswordSecure(userDTO.password, userDTO.firstName, userDTO.username);
+export function validateFields(userDto: CreateUserDto | UpdateUserDto): void {
+  isNameValid(userDto.firstName, userDto.lastName);
+  isEmailValid(userDto.email);
+  isUsernameValid(userDto.username);
+  isPasswordSecure(userDto.password, userDto.firstName, userDto.username);
   // Date of birth is optional
-  if (userDTO.dateOfBirth) {
-    isDateValid(userDTO.dateOfBirth);
+  if (userDto.dateOfBirth) {
+    isDateValid(userDto.dateOfBirth);
   }
   return;
 }

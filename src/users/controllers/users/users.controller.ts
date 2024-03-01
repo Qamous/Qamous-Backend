@@ -53,8 +53,7 @@ export class UsersController {
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: on the front end, make sure to protect from sql injection
     // validation TODO: put all the validation in a separate function once done and return an http error if received any error
-    validateFields(createUserDto);
-    // TODO: add validation for other fields
+    this.httpValidateFields(createUserDto);
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
     this.passwordConfirmation(passwordConfirmation, userDetails.password);
@@ -78,13 +77,28 @@ export class UsersController {
     await this.verifyOldPassword(id, updateUserDto);
 
     // validation
-    validateFields(updateUserDto);
-    // TODO: add validation for other fields
+    this.httpValidateFields(updateUserDto);
 
     delete updateUserDto.oldPassword;
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
     this.passwordConfirmation(passwordConfirmation, newUserDetails.password);
     return await this.usersService.updateUser(id, newUserDetails);
+  }
+
+  /**
+   * This is a helper function that validates the fields of a user and throws an http error if they are invalid.
+   * It is used in the createUser and updateUserById methods.
+   *
+   * @param {CreateUserDto | UpdateUserDto} userDto - the fields of the user to validate
+   * @returns {void} - nothing
+   * @private
+   */
+  private httpValidateFields(userDto: CreateUserDto | UpdateUserDto): void {
+    try {
+      validateFields(userDto);
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    }
   }
 
   /**
