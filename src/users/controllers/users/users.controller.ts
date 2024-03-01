@@ -53,7 +53,7 @@ export class UsersController {
    */
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
-    // validation TODO: put all the validation in a separate function once done and return an error if any fail
+    // validation TODO: put all the validation in a separate function once done and return an http error if received any error
     isPasswordSecure(createUserDto.password);
     // TODO: add validation for other fields
 
