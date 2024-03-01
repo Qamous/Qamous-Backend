@@ -54,7 +54,7 @@ export class UsersController {
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // validation TODO: put all the validation in a separate function once done and return an http error if received any error
-    isPasswordSecure(createUserDto.password);
+    isPasswordSecure(createUserDto.password, createUserDto.firstName);
     // TODO: add validation for other fields
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
@@ -78,7 +78,7 @@ export class UsersController {
     await this.verifyOldPassword(id, updateUserDto);
 
     // validation
-    isPasswordSecure(updateUserDto.password);
+    isPasswordSecure(updateUserDto.password, updateUserDto.firstName);
     // TODO: add validation for other fields
 
     delete updateUserDto.oldPassword;
