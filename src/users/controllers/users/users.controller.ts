@@ -53,7 +53,7 @@ export class UsersController {
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: on the front end, make sure to protect from sql injection
     // validation TODO: put all the validation in a separate function once done and return an http error if received any error
-    validateFields(createUserDto.password, createUserDto.firstName);
+    validateFields(createUserDto);
     // TODO: add validation for other fields
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
@@ -78,7 +78,7 @@ export class UsersController {
     await this.verifyOldPassword(id, updateUserDto);
 
     // validation
-    validateFields(updateUserDto.password, updateUserDto.firstName);
+    validateFields(updateUserDto);
     // TODO: add validation for other fields
 
     delete updateUserDto.oldPassword;
