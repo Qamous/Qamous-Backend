@@ -53,6 +53,7 @@ export class UsersController {
    */
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
+    // TODO: on the front end, make sure to protect from sql injection
     // validation TODO: put all the validation in a separate function once done and return an http error if received any error
     isPasswordSecure(createUserDto.password, createUserDto.firstName);
     // TODO: add validation for other fields
@@ -74,6 +75,7 @@ export class UsersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
   ): Promise<UpdateResult> {
+    // TODO: on the front end, make sure to protect from sql injection
     // make sure old password is correct
     await this.verifyOldPassword(id, updateUserDto);
 
