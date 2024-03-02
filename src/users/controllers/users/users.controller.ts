@@ -52,7 +52,7 @@ export class UsersController {
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: on the front end, make sure to protect from sql injection
-    // validation TODO: put all the validation in a separate function once done and return an http error if received any error
+    // validation
     this.httpValidateFields(createUserDto);
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
@@ -75,11 +75,11 @@ export class UsersController {
     // TODO: on the front end, make sure to protect from sql injection
     // make sure old password is correct
     await this.verifyOldPassword(id, updateUserDto);
-
     // validation
     this.httpValidateFields(updateUserDto);
-
+    // remove the old password from the object
     delete updateUserDto.oldPassword;
+    // if the password is being updated, verify the password confirmation
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
     this.passwordConfirmation(passwordConfirmation, newUserDetails.password);
     return await this.usersService.updateUser(id, newUserDetails);
@@ -102,7 +102,7 @@ export class UsersController {
   }
 
   /**
-   * This is a helper function that verifies the password confirmation and throws an error if it is incorrect.
+   * This is a helper function that verifies the password confirmation and throws an error if it is incorrect only if the password is being updated.
    * It is used in the createUser and updateUserById methods.
    *
    * @param {string} passwordConfirmation - the password confirmation to verify
@@ -114,7 +114,10 @@ export class UsersController {
     passwordConfirmation: string,
     password: string,
   ): void {
-    if (passwordConfirmation !== password) {
+    if (
+      (passwordConfirmation || password) &&
+      passwordConfirmation !== password
+    ) {
       throw new HttpException(
         'Password confirmation does not match password',
         HttpStatus.BAD_REQUEST,
