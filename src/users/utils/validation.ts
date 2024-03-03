@@ -53,6 +53,9 @@ function isNameValid(firstName: string, lastName: string): void {
  * @returns {void} - nothing
  */
 function isEmailValid(email: string): void {
+  if (!email || email === '') {
+    throw new Error('Email is required');
+  }
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     throw new Error('Email is not valid');
