@@ -313,8 +313,8 @@ describe('Validation', () => {
         lastName: 'Doe',
         email: 'john.doe@example.com',
         username: 'johndoe',
-        password: 'P'.repeat(101),
-        passwordConfirmation: 'P'.repeat(101),
+        password: 'Pa1!'.repeat(25) + '1',
+        passwordConfirmation: 'P'.repeat(25) + '1',
         createdAt: new Date(),
         dateOfBirth: new Date('2000-01-01'),
       };
@@ -373,8 +373,8 @@ describe('Validation', () => {
         lastName: 'Doe',
         email: 'john.doe@example.com',
         username: 'johndoe',
-        password: 'AAAAA11111!!!',
-        passwordConfirmation: 'AAAAA11111!!!',
+        password: 'AAAaa11111!!!',
+        passwordConfirmation: 'AAAaa11111!!!',
         createdAt: new Date(),
         dateOfBirth: new Date('2000-01-01'),
       };
@@ -382,7 +382,6 @@ describe('Validation', () => {
         'Password must contain at least 5 unique characters',
       );
     });
-
     it('should throw an error if password is a common password', () => {
       const userDto: CreateUserDto = {
         firstName: 'John',
