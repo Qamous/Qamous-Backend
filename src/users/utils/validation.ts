@@ -56,7 +56,7 @@ function isEmailValid(email: string): void {
   if (!email || email === '') {
     throw new Error('Email is required');
   }
-  const emailRegex = /^[^@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex: RegExp = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     throw new Error('Email is not valid');
   }
