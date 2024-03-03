@@ -525,5 +525,18 @@ describe('Validation', () => {
       };
       expect(() => validateFields(userDto)).not.toThrow();
     });
+    it('should not throw an error if dateOfBirth is 9/11/2001 (My DOB)', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2001-09-11'),
+      };
+      expect(() => validateFields(userDto)).not.toThrow();
+    });
   });
 });
