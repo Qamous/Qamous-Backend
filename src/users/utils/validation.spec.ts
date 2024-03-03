@@ -441,4 +441,54 @@ describe('Validation', () => {
       expect(() => validateFields(userDto)).not.toThrow();
     });
   });
+
+  // This is a test suite for the validateFields date of birth validation
+  describe('validateFields for dateOfBirth', () => {
+    it('should not throw an error if dateOfBirth is not provided / null', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: null,
+      };
+      expect(() => validateFields(userDto)).not.toThrow();
+    });
+
+    it('should throw an error if dateOfBirth is less than 3 years ago', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date(), // Today's date
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Date must be over 3 years ago',
+      );
+    });
+
+    it('should not throw an error if dateOfBirth is more than 3 years ago', () => {
+      const dateOfBirth = new Date();
+      dateOfBirth.setFullYear(dateOfBirth.getFullYear() - 4); // 4 years ago
+
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: dateOfBirth,
+      };
+      expect(() => validateFields(userDto)).not.toThrow();
+    });
+  });
 });
