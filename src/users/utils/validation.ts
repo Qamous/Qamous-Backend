@@ -56,7 +56,7 @@ function isEmailValid(email: string): void {
   if (!email || email === '') {
     throw new Error('Email is required');
   }
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex = /^[^@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     throw new Error('Email is not valid');
   }
@@ -179,7 +179,7 @@ function isDateValid(date: Date): void {
     throw new Error('Date of birth cannot be in the future');
   }
   // If the date is not over 3 years ago, throw an error
-  if (date > threeYearsAgo) {
+  if (date >= threeYearsAgo) {
     throw new Error('Date of birth must be over 3 years ago');
   }
   return;

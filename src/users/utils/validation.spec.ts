@@ -144,6 +144,21 @@ describe('Validation', () => {
       };
       expect(() => validateFields(userDto)).toThrow('Email is not valid');
     });
+    it('should throw an error if email contains spaces', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe @example.com', // Spaces in email
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2001-09-11'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Email must not contain spaces',
+      );
+    });
     it('should not throw an error if email format is valid', () => {
       const userDto: CreateUserDto = {
         firstName: 'John',
@@ -504,6 +519,24 @@ describe('Validation', () => {
         passwordConfirmation: 'SecureP@ssw0rd',
         createdAt: new Date(),
         dateOfBirth: twoYearsAgo,
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Date of birth must be over 3 years ago',
+      );
+    });
+    it('should throw an error if dateOfBirth is exactly 3 years ago', () => {
+      const threeYearsAgo = new Date();
+      threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3);
+
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: threeYearsAgo,
       };
       expect(() => validateFields(userDto)).toThrow(
         'Date of birth must be over 3 years ago',
