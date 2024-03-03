@@ -158,4 +158,62 @@ describe('Validation', () => {
       expect(() => validateFields(userDto)).not.toThrow();
     });
   });
+
+  // This is a test suite for the validateFields username validation
+  describe('validateFields for username', () => {
+    it('should throw an error if username is empty', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: '',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow('Username is required');
+    });
+    it('should throw an error if username is too long', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'a'.repeat(101),
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow('Username is too long');
+    });
+    it('should throw an error if username contains spaces', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'john doe', // Spaces
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Username must not contain spaces',
+      );
+    });
+    it('should not throw an error if username is valid', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).not.toThrow();
+    });
+  });
 });
