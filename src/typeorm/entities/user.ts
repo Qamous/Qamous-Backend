@@ -29,8 +29,7 @@ export class User {
 
   @Column({ nullable: true, type: 'blob' })
   profilePicture: Buffer;
-  // should be a later feature... so everyone gets a null profile picture
-  // at first
+  // TODO: should be a later feature... so everyone gets a null profile picture at first
 
   @Column({ default: 0 })
   likesReceived: number;
