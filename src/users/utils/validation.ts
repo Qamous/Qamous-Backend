@@ -174,9 +174,13 @@ function isPasswordSecure(
 function isDateValid(date: Date): void {
   const threeYearsAgo = new Date();
   threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3);
+  // If the date is in the future, throw an error
+  if (date > new Date()) {
+    throw new Error('Date of birth cannot be in the future');
+  }
   // If the date is not over 3 years ago, throw an error
   if (date > threeYearsAgo) {
-    throw new Error('Date must be over 3 years ago');
+    throw new Error('Date of birth must be over 3 years ago');
   }
   return;
 }
