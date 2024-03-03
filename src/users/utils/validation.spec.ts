@@ -155,9 +155,7 @@ describe('Validation', () => {
         createdAt: new Date(),
         dateOfBirth: new Date('2001-09-11'),
       };
-      expect(() => validateFields(userDto)).toThrow(
-        'Email must not contain spaces',
-      );
+      expect(() => validateFields(userDto)).toThrow('Email is not valid');
     });
     it('should not throw an error if email format is valid', () => {
       const userDto: CreateUserDto = {
