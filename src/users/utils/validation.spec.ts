@@ -216,4 +216,230 @@ describe('Validation', () => {
       expect(() => validateFields(userDto)).not.toThrow();
     });
   });
+
+  // This is a test suite for the validateFields password validation
+  describe('validateFields for password', () => {
+    it('should throw an error if password is empty', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: '',
+        passwordConfirmation: '',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow('Password is required');
+    });
+    it('should throw an error if password does not contain at least one uppercase letter', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'password123!',
+        passwordConfirmation: 'password123!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must contain at least one uppercase letter',
+      );
+    });
+    it('should throw an error if password does not contain at least one lowercase letter', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'PASSWORD123!',
+        passwordConfirmation: 'PASSWORD123!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must contain at least one lowercase letter',
+      );
+    });
+    it('should throw an error if password does not contain at least one number', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'PasswordPassword!',
+        passwordConfirmation: 'PasswordPassword!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must contain at least one number',
+      );
+    });
+    it('should throw an error if password does not contain at least one special character', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'Password1234',
+        passwordConfirmation: 'Password1234',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must contain at least one special character',
+      );
+    });
+    it('should throw an error if password is less than 12 characters long', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'Pass123!',
+        passwordConfirmation: 'Pass123!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must be at least 12 characters long',
+      );
+    });
+    it('should throw an error if password is more than 100 characters long', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'P'.repeat(101),
+        passwordConfirmation: 'P'.repeat(101),
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must be at most 100 characters long',
+      );
+    });
+    it('should throw an error if password contains spaces', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'Password 123!',
+        passwordConfirmation: 'Password 123!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must not contain spaces',
+      );
+    });
+    it("should throw an error if password contains the user's first name", () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'JohnPassword123!',
+        passwordConfirmation: 'JohnPassword123!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must not contain first name',
+      );
+    });
+    it("should throw an error if password contains the user's username", () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'johndoePass123!',
+        passwordConfirmation: 'johndoePass123!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must not contain username',
+      );
+    });
+    it('should throw an error if password does not contain at least 5 unique characters', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'AAAAA11111!!!',
+        passwordConfirmation: 'AAAAA11111!!!',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Password must contain at least 5 unique characters',
+      );
+    });
+
+    it('should throw an error if password is a common password', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'QamousPa$$w0rd',
+        passwordConfirmation: 'QamousPa$$w0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'QamousPa$$w0rd is a common password',
+      );
+    });
+    it('should throw an error if password is "qamousPa$$w0rd"', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'qamousPa$$w0rd',
+        passwordConfirmation: 'qamousPa$$w0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'qamousPa$$w0rd is a common password',
+      );
+    });
+    it('should throw an error if password is "Qamouspa$$w0rd"', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'Qamouspa$$w0rd',
+        passwordConfirmation: 'Qamouspa$$w0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Qamouspa$$w0rd is a common password',
+      );
+    });
+    it('should not throw an error if password is valid', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).not.toThrow();
+    });
+  });
 });

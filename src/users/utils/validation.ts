@@ -111,6 +111,9 @@ function isPasswordSecure(
   firstName: string,
   userName: string,
 ): void {
+  if (!password || password === '') {
+    throw new Error('Password is required');
+  }
   const hasUpperCase = /[A-Z]/.test(password);
   const hasLowerCase = /[a-z]/.test(password);
   const hasNumber = /\d/.test(password);
