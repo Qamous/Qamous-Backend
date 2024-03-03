@@ -444,6 +444,7 @@ describe('Validation', () => {
 
   // This is a test suite for the validateFields date of birth validation
   describe('validateFields for dateOfBirth', () => {
+    // TODO: does the date of birth need to be provided?
     it('should not throw an error if dateOfBirth is not provided / null', () => {
       const userDto: CreateUserDto = {
         firstName: 'John',
@@ -457,7 +458,24 @@ describe('Validation', () => {
       };
       expect(() => validateFields(userDto)).not.toThrow();
     });
+    it('should throw an error if dateOfBirth is in the future', () => {
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1); // 1 year in the future
 
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: futureDate,
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Date of birth cannot be in the future',
+      );
+    });
     it('should throw an error if dateOfBirth is less than 3 years ago', () => {
       const userDto: CreateUserDto = {
         firstName: 'John',
@@ -470,10 +488,27 @@ describe('Validation', () => {
         dateOfBirth: new Date(), // Today's date
       };
       expect(() => validateFields(userDto)).toThrow(
-        'Date must be over 3 years ago',
+        'Date of birth must be over 3 years ago',
       );
     });
+    it('should throw an error if dateOfBirth is 2 years ago', () => {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2); // 2 years ago
 
+      const userDto: CreateUserDto = {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: twoYearsAgo,
+      };
+      expect(() => validateFields(userDto)).toThrow(
+        'Date of birth must be over 3 years ago',
+      );
+    });
     it('should not throw an error if dateOfBirth is more than 3 years ago', () => {
       const dateOfBirth = new Date();
       dateOfBirth.setFullYear(dateOfBirth.getFullYear() - 4); // 4 years ago
