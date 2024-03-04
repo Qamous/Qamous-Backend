@@ -9,13 +9,13 @@ export type CreateUserParams = {
 };
 
 export type UpdateUserParams = {
-  firstName: string;
-  lastName: string;
-  email: string;
-  username: string;
-  password: string;
-  dateOfBirth: Date;
-  createdAt: Date;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  username?: string;
+  password?: string;
+  dateOfBirth?: Date;
+  createdAt?: Date;
 };
 
 export type CreateCountryParams = {
