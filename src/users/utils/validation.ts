@@ -5,6 +5,9 @@
 import { CreateUserDto } from '../dtos/create-user.dto';
 import { UpdateUserDto } from '../dtos/update-user.dto';
 
+// The type of names to validate
+type NameType = 'First' | 'Last';
+
 /**
  * This function validates the fields of a user and throws an error if they are invalid.
  *
@@ -12,14 +15,57 @@ import { UpdateUserDto } from '../dtos/update-user.dto';
  * @returns {void} - nothing
  */
 export function validateFields(userDto: CreateUserDto | UpdateUserDto): void {
-  // TODO: validation not required for null fields in UpdateUserDto
-  isNameValid(userDto.firstName, userDto.lastName);
-  isEmailValid(userDto.email);
-  isUsernameValid(userDto.username);
-  isPasswordSecure(userDto.password, userDto.firstName, userDto.username);
-  // Date of birth is optional
-  if (userDto.dateOfBirth) {
-    isDateValid(userDto.dateOfBirth);
+  if (userDto instanceof UpdateUserDto) {
+    if (
+      userDto.firstName !== null &&
+      userDto.firstName !== undefined &&
+      userDto.firstName !== ''
+    ) {
+      isNameValid(userDto.firstName, 'First');
+    } else {
+      delete userDto.firstName;
+    }
+    if (
+      userDto.lastName !== null &&
+      userDto.lastName !== undefined &&
+      userDto.lastName !== ''
+    ) {
+      isNameValid(userDto.lastName, 'Last');
+    } else {
+      delete userDto.lastName;
+    }
+    if (userDto.email !== null && userDto.email !== undefined) {
+      isEmailValid(userDto.email);
+    } else {
+      delete userDto.email;
+    }
+    if (userDto.username !== null && userDto.username !== undefined) {
+      isUsernameValid(userDto.username);
+    } else {
+      delete userDto.username;
+    }
+    if (userDto.password !== null && userDto.password !== undefined) {
+      isPasswordSecure(userDto.password, userDto.firstName, userDto.username);
+    } else {
+      delete userDto.password;
+    }
+    if (userDto.dateOfBirth !== null && userDto.dateOfBirth !== undefined) {
+      isDateValid(userDto.dateOfBirth);
+    } else {
+      delete userDto.dateOfBirth;
+    }
+  }
+  // if instance of CreateUserDto
+  else {
+    isNameValid(userDto.firstName, 'First');
+    isNameValid(userDto.lastName, 'Last');
+    isEmailValid(userDto.email);
+    isUsernameValid(userDto.username);
+    isPasswordSecure(userDto.password, userDto.firstName, userDto.username);
+    // Date of birth is optional
+    if (userDto.dateOfBirth) {
+      isDateValid(userDto.dateOfBirth);
+    }
   }
   return;
 }
@@ -30,19 +76,16 @@ export function validateFields(userDto: CreateUserDto | UpdateUserDto): void {
  * - not be empty
  * - be at most 100 characters long
  *
- * @param {string} firstName - the first name to validate
- * @param {string} lastName - the last name to validate
+ * @param {string} name - the name to validate
+ * @param {NameType} type - the type of name to validate (first or last)
  * @returns {void} - nothing
  */
-function isNameValid(firstName: string, lastName: string): void {
-  if (!firstName || !lastName || firstName === '' || lastName === '') {
-    throw new Error('First name and last name are required');
+function isNameValid(name: string, type: NameType): void {
+  if (!name) {
+    throw new Error(type + ' name is required');
   }
-  if (firstName.length > 100) {
-    throw new Error('First name is too long');
-  }
-  if (lastName.length > 100) {
-    throw new Error('Last name is too long');
+  if (name.length > 100) {
+    throw new Error(type + ' name is too long');
   }
   return;
 }

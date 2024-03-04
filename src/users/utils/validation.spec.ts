@@ -16,25 +16,21 @@ describe('Validation', () => {
         createdAt: new Date(),
         dateOfBirth: new Date('2000-01-01'),
       };
-      expect(() => validateFields(userDto)).toThrow(
-        'First name and last name are required',
-      );
+      expect(() => validateFields(userDto)).toThrow('First name is required');
     });
     it('should throw an error if last name is empty in UpdateUserDto', () => {
-      const userDto: UpdateUserDto = {
-        firstName: 'John',
-        lastName: '',
-        email: 'john.doe@example.com',
-        username: 'johndoe',
-        oldPassword: 'OldP@ssw0rd',
-        password: 'SecureP@ssw0rd',
-        passwordConfirmation: 'SecureP@ssw0rd',
-        createdAt: new Date(),
-        dateOfBirth: new Date('2000-01-01'),
-      };
-      expect(() => validateFields(userDto)).toThrow(
-        'First name and last name are required',
+      const userDto: UpdateUserDto = new UpdateUserDto(
+        'John',
+        '',
+        'john.doe@example.com',
+        'johndoe',
+        'OldP@ssw0rd',
+        'SecureP@ssw0rd',
+        'SecureP@ssw0rd',
+        new Date('2000-01-01'),
+        new Date(),
       );
+      expect(() => validateFields(userDto)).not.toThrow();
     });
     it('should throw an error if first name is too long', () => {
       const userDto: CreateUserDto = {
@@ -49,7 +45,7 @@ describe('Validation', () => {
       };
       expect(() => validateFields(userDto)).toThrow('First name is too long');
     });
-    it('should throw an error if last name is too long', () => {
+    it('should throw an error if last name is too long in CreateUserDto', () => {
       const userDto: CreateUserDto = {
         firstName: 'John',
         lastName: 'D'.repeat(101),
@@ -61,6 +57,19 @@ describe('Validation', () => {
         dateOfBirth: new Date('2000-01-01'),
       };
       expect(() => validateFields(userDto)).toThrow('Last name is too long');
+    });
+    it('should throw an error if first name is too long in UpdateUserDto', () => {
+      const userDto: CreateUserDto = {
+        firstName: 'J'.repeat(110),
+        lastName: '',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        createdAt: new Date(),
+        dateOfBirth: new Date('2000-01-01'),
+      };
+      expect(() => validateFields(userDto)).toThrow('First name is too long');
     });
     it('should not throw an error if first and last name are valid', () => {
       const userDto: CreateUserDto = {
