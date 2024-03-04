@@ -12,6 +12,7 @@ import { UpdateUserDto } from '../dtos/update-user.dto';
  * @returns {void} - nothing
  */
 export function validateFields(userDto: CreateUserDto | UpdateUserDto): void {
+  // TODO: validation not required for null fields in UpdateUserDto
   isNameValid(userDto.firstName, userDto.lastName);
   isEmailValid(userDto.email);
   isUsernameValid(userDto.username);
