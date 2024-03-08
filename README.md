@@ -6,6 +6,8 @@ contribute and explore definitions of Arabic and Franco-Arabic words. The backen
 authentication, word and definition management, as well as user interactions such as liking, disliking, and reporting 
 definitions.
 
+**If you're looking for the Front-End, find it [here](https://github.com/anthonyyoussef01/Qamous).
+
 
 ## Technologies Used
 - **Nest.js**: A progressive Node.js framework for building efficient, reliable, and scalable server-side applications.
