@@ -79,7 +79,7 @@ interactions.
 - **DELETE /definitions/{definitionID}/dislikes/{userID}**: Remove a dislike from a definition for a specific user.
 
 ### Word Reports Management
-- **POST /reports/{wordID}**: Add a new report to a word.
+- **POST /reports**: Add a new report to a word.
 - **GET /reports**: Get a list of all word reports.
 - **GET /reports/word/{wordID}**: Get reports for a specific word.
 - **GET /reports/{reportID}**: Get details of a specific word report.
