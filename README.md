@@ -14,6 +14,7 @@ definitions.
 interactions.
 - **Node.js**: A JavaScript runtime environment for building server-side and networking applications.
 - **REST API**: Follows the Representational State Transfer architectural style for designing networked applications.
+- **Jest**: The testing framework used for unit and integration tests.
 - Might wanna use **Passport.js** and **Express Session**.
 
 
