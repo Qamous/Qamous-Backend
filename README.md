@@ -73,14 +73,17 @@ interactions.
 - **POST /definitions/{definitionID}/likes**: Like a definition.
 - **POST /definitions/{definitionID}/dislikes**: Dislike a definition.
 - **GET /definitions/{definitionID}/likes-dislikes**: Get all likes and dislikes for a specific definition.
+- **GET /definitions/{definitionID}/likes**: Get number of likes for a specific definition.
+- **GET /definitions/{definitionID}/dislikes**: Get number of dislikes for a specific definition.
 - **DELETE /definitions/{definitionID}/likes/{userID}**: Remove a like from a definition for a specific user.
 - **DELETE /definitions/{definitionID}/dislikes/{userID}**: Remove a dislike from a definition for a specific user.
 
-### Reports Management
-- **POST /word-reports**: Add a new report to a word.
-- **GET /word-reports**: Get a list of all word reports.
-- **GET /word-reports/{reportID}**: Get details of a specific word report.
-- **DELETE /word-reports/{reportID}**: Delete a word report.
+### Word Reports Management
+- **POST /reports/{wordID}**: Add a new report to a word.
+- **GET /reports**: Get a list of all word reports.
+- **GET /reports/word/{wordID}**: Get reports for a specific word.
+- **GET /reports/{reportID}**: Get details of a specific word report.
+- **DELETE /reports/{reportID}**: Delete a word report.
 
 ## Schema Details
 The database schema for UrbanDictionaryAR consists of the following tables:
