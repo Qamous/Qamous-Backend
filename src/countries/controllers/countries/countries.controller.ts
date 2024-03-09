@@ -46,7 +46,7 @@ export class CountriesController {
    * details of the new country
    * @returns {Promise<Country>} - the newly created Country object
    */
-  @Post('register')
+  @Post()
   async registerCountry(
     @Body() createCountryDto: CreateCountryDto,
   ): Promise<Country> {
