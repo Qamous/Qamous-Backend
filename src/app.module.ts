@@ -13,7 +13,7 @@ import { CountriesModule } from './countries/countries.module';
 import { DefinitionLikesDislikesModule } from './definition-likes-dislikes/definition-likes-dislikes.module';
 import { WordReportsModule } from './word-reports/word-reports.module';
 
-dotenv.config();
+dotenv.config({ path: './safe/.env' });
 
 @Module({
   imports: [
