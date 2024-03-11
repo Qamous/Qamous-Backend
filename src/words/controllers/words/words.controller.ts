@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { WordsService } from '../../services/words/words.service';
 import { Word } from '../../../typeorm/entities/word';
 import { CreateWordDto } from '../../dtos/create-word.dto';
+import { UpdateWordDto } from '../../dtos/update-word.dto';
+import { UpdateResult } from 'typeorm';
 
 @Controller('word')
 export class WordsController {
@@ -14,9 +16,25 @@ export class WordsController {
    * @param {CreateWordDto} wordDetails - the details of the new word
    * @returns {Promise<Word>} - the newly created Word object
    */
-  @Post('add')
+  @Post('')
   async addWord(@Body() wordDetails: CreateWordDto): Promise<Word> {
     return await this.wordsService.addWord(wordDetails);
+  }
+
+  /**
+   * This is a PATCH request to /word/:wordID that updates a word by its id
+   *
+   * @param {number} wordID - the id of the word to update
+   * @param {UpdateWordDto} updateWordDto - a UpdateWordDto object that contains the
+   * details of the word to replace the existing word
+   * @returns {Promise<UpdateResult>} - the update result
+   */
+  @Patch(':wordID')
+  async updateWord(
+    @Param('wordID') wordID: number,
+    @Body() updateWordDto: UpdateWordDto,
+  ): Promise<UpdateResult> {
+    return await this.wordsService.updateWord(wordID, updateWordDto);
   }
 
   /**

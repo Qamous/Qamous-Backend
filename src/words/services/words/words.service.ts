@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Word } from '../../../typeorm/entities/word';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { Like, Repository, UpdateResult } from 'typeorm';
 import { CreateWordParams } from '../../../utils/types';
+import { UpdateWordDto } from '../../dtos/update-word.dto';
 
 @Injectable()
 export class WordsService {
@@ -23,6 +24,21 @@ export class WordsService {
       createdAt: new Date(),
     });
     return await this.wordsRepository.save(newWord);
+  }
+
+  /**
+   * This updates a word by its id
+   *
+   * @param {number} wordID - the id of the word to update
+   * @param {UpdateWordDto} updateWordDto - a UpdateWordDto object that contains the
+   * details of the word to replace the existing word
+   * @returns {Promise<UpdateResult>} - the update result
+   */
+  async updateWord(
+    wordID: number,
+    updateWordDto: UpdateWordDto,
+  ): Promise<UpdateResult> {
+    return await this.wordsRepository.update(wordID, updateWordDto);
   }
 
   /**
