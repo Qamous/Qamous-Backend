@@ -13,6 +13,7 @@ import { CountriesModule } from './countries/countries.module';
 import { DefinitionLikesDislikesModule } from './definition-likes-dislikes/definition-likes-dislikes.module';
 import { WordReportsModule } from './word-reports/word-reports.module';
 import { Word } from './typeorm/entities/word';
+import { Definition } from './typeorm/entities/definition';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -25,7 +26,7 @@ dotenv.config({ path: './safe/.env' });
       username: process.env.USER,
       password: process.env.PASSWORD,
       database: process.env.DATABASE,
-      entities: [User, Country, Word],
+      entities: [User, Country, Word, Definition],
       synchronize: true,
     }),
     UsersModule,
