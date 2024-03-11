@@ -1,6 +1,6 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
-@Entity({ name: 'country' })
+@Entity({ name: 'countries' })
 export class Country {
   @PrimaryColumn({
     type: 'char',
