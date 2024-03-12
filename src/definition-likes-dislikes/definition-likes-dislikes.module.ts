@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
-import { DefinitionLikesDislikesController } from './controllers/definition-likes-dislikes/definition-likes-dislikes.controller';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { DefinitionLikeDislike } from '../typeorm/entities/definition-like-dislike';
 import { DefinitionLikesDislikesService } from './services/definition-likes-dislikes/definition-likes-dislikes.service';
 
 @Module({
-  controllers: [DefinitionLikesDislikesController],
-  providers: [DefinitionLikesDislikesService]
+  imports: [TypeOrmModule.forFeature([DefinitionLikeDislike])],
+  providers: [DefinitionLikesDislikesService],
+  exports: [DefinitionLikesDislikesService],
 })
 export class DefinitionLikesDislikesModule {}

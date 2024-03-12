@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DefinitionLikesDislikes } from '../../../typeorm/entities/definition-likes-dislikes';
+import { DefinitionLikeDislike } from '../../../typeorm/entities/definition-like-dislike';
 
 @Injectable()
 export class DefinitionLikesDislikesService {
   constructor(
-    @InjectRepository(DefinitionLikesDislikes)
-    private definitionLikesDislikesRepository: Repository<DefinitionLikesDislikes>,
+    @InjectRepository(DefinitionLikeDislike)
+    private definitionLikesDislikesRepository: Repository<DefinitionLikeDislike>,
   ) {}
 
   async likeDefinition(definitionID: string, userID: string) {

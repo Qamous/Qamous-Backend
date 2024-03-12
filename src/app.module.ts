@@ -14,6 +14,8 @@ import { DefinitionLikesDislikesModule } from './definition-likes-dislikes/defin
 import { WordReportsModule } from './word-reports/word-reports.module';
 import { Word } from './typeorm/entities/word';
 import { Definition } from './typeorm/entities/definition';
+import { DefinitionLikeDislike } from './typeorm/entities/definition-like-dislike';
+import { WordReport } from './typeorm/entities/word-report';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -26,7 +28,14 @@ dotenv.config({ path: './safe/.env' });
       username: process.env.USER,
       password: process.env.PASSWORD,
       database: process.env.DATABASE,
-      entities: [User, Country, Word, Definition],
+      entities: [
+        User,
+        Country,
+        Word,
+        Definition,
+        DefinitionLikeDislike,
+        WordReport,
+      ],
       synchronize: true,
     }),
     UsersModule,
