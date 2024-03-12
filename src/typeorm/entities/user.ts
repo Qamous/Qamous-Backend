@@ -19,10 +19,7 @@ export class User {
   username: string;
 
   @Column({ nullable: false })
-  hashedPassword: string;
-
-  @Column({ nullable: false })
-  salt: string;
+  password: string;
 
   @Column({ nullable: true })
   dateOfBirth: Date;
