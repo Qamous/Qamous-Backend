@@ -28,21 +28,12 @@ export class UsersService {
    * @returns {Promise<User>} - the newly created User object
    */
   async createUser(userDetails: CreateUserParams): Promise<User> {
-    const hashedPassword = newPasswordHashing(
-      userDetails.password,
-      userDetails.firstName,
-    );
+    const hashedPassword = newPasswordHashing(userDetails.password);
     const newUser = this.usersRepository.create({
-      password: hashedPassword[0],
-      salt: hashedPassword[1],
+      password: hashedPassword,
       ...userDetails,
       createdAt: new Date(),
     });
-
-    // This is not very clean,
-    // but it essentially renames CreateUserParams.password to hashedPassword for the User object
-    newUser['hashedPassword'] = newUser['password'];
-    delete newUser['password'];
 
     return await this.usersRepository.save(newUser);
   }
