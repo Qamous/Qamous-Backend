@@ -1,25 +1,23 @@
-DZ, Algeria
-BH, Bahrain
-TD, Chad
-KM, Comoros
-DJ, Djibouti
-EG, Egypt
-IQ, Iraq
-JO, Jordan
-KW, Kuwait
-LB, Lebanon
-LY, Libya
-ML, Mali
-MR, Mauritania
-MA, Morocco
-OM, Oman
-PS, Palestine
-QA, Qatar
-SA, Saudi Arabia
-SO, Somalia
-SD, Sudan
-SY, Syria
-TN, Tunisia
-TZ, Tanzania
-AE, United Arab Emirates
-YE, Yemen
+CountryCode, CountryName, Dialects
+DZ, Algeria, Algerian Arabic, Hassaniya Arabic, Algerian Saharan Arabic
+BH, Bahrain, Bahrani Arabic, Gulf Arabic
+TD, Chad, Chadian Arabic
+DJ, Djibouti, Taʽizzi-Adeni Arabic
+EG, Egypt, Egyptian Arabic (Colloquial Egyptian), Sa3idi Arabic (Upper Egyptian Arabic), Eastern Egyptian Bedawi Arabic, Western Egyptian Bedawi Arabic, Northwest Arabian Arabic
+IQ, Iraq, Mesopotamian Arabic, Gulf Arabic, Najdi Arabic, North Mesopotamian Arabic
+JO, Jordan, Levantine Arabic, Northwest Arabian Arabic, Najdi Arabic, Mesopotamian Arabic
+KW, Kuwait, Gulf Arabic, Mesopotamian Arabic
+LB, Lebanon, Levantine Arabic
+LY, Libya, Libyan Arabic
+ML, Mali, Hassaniya Arabic
+MR, Mauritania, Hassaniya Arabic
+MA, Morocco, Moroccan Arabic (Darija), Hassaniya Arabic
+OM, Oman, Omani Arabic, Gulf Arabic, Dhofari Arabic, Shihhi Arabic
+PS, Palestine, Levantine Arabic, Northwest Arabian Arabic
+QA, Qatar, Gulf Arabic
+SA, Saudi Arabia, Najdi Arabic, Hejazi Arabic, Gulf Arabic
+SD, Sudan, Sudanese Arabic, Juba Arabic (South Sudanese)
+SY, Syria, Levantine Arabic, Northwest Arabian Arabic, Najdi Arabic, North Mesopotamian Arabic, Mesopotamian Arabic
+TN, Tunisia, Tunisian Arabic
+AE, United Arab Emirates, Emirati Arabic (Gulf Arabic), Shihhi Arabic
+YE, Yemen, Yemeni Arabic, Sanʽani Arabic, Taʽizzi-Adeni Arabic, Hadhrami Arabic
