@@ -150,7 +150,7 @@ function isUsernameValid(username: string): void {
  * @param {string} userName - the username of the user
  * @returns {void} - nothing
  */
-function isPasswordSecure(
+export function isPasswordSecure(
   password: string,
   firstName: string,
   userName: string,
