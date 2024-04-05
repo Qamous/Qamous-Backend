@@ -1,4 +1,11 @@
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { Word } from './word';
 import { User } from './user';
 
@@ -7,14 +14,22 @@ export class Definition {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
+  // The definitions that we generate will have a user ID of 1
   @ManyToOne(() => Word)
+  @JoinColumn({ name: 'wordId' })
   word: Word;
 
-  // The definitions that we generate will have a user ID of 0
   @ManyToOne(() => User)
+  @JoinColumn({ name: 'userId' })
   user: User;
 
   @Column({ nullable: false })
+  wordId: number;
+
+  @Column({ nullable: false })
+  userId: number;
+
+  @Column({ nullable: false, length: 10000 })
   definition: string;
 
   // Examples are not required
@@ -24,7 +39,7 @@ export class Definition {
   @Column({ nullable: false })
   isArabic: boolean;
 
-  @Column({ nullable: false })
+  @CreateDateColumn({ type: 'timestamp' })
   AddedTimestamp: Date;
 
   @Column({ default: 0 })
