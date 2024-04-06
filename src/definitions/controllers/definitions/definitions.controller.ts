@@ -22,6 +22,11 @@ export class DefinitionsController {
     return this.definitionsService.getDefinitions();
   }
 
+  @Get('most-liked')
+  async getMostLikedDefinitions(): Promise<Definition[]> {
+    return this.definitionsService.getMostLikedDefinitions();
+  }
+
   @Get(':id')
   async getDefinitionById(@Param('id') id: number): Promise<Definition> {
     return this.definitionsService.getDefinitionById(id);
