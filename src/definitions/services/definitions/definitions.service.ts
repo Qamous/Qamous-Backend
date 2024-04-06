@@ -16,6 +16,15 @@ export class DefinitionsService {
     return this.definitionsRepository.find();
   }
 
+  async getMostLikedDefinitions(): Promise<Definition[]> {
+    return this.definitionsRepository
+      .createQueryBuilder('definition')
+      .select('definition.wordId', 'word')
+      .addSelect('MAX(definition.likeCount)', 'maxLikeCount')
+      .groupBy('definition.wordId')
+      .getRawMany();
+  }
+
   async getDefinitionById(id: number): Promise<Definition> {
     return this.definitionsRepository.findOne({
       where: { id },
