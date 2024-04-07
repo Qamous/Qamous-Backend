@@ -19,9 +19,19 @@ export class DefinitionsService {
   async getMostLikedDefinitions(): Promise<Definition[]> {
     return this.definitionsRepository
       .createQueryBuilder('definition')
-      .select('definition.wordId', 'word')
-      .addSelect('MAX(definition.likeCount)', 'maxLikeCount')
+      .leftJoinAndSelect('definition.word', 'word')
+      .select('definition.wordId', 'wordId')
+      .addSelect('definition.isArabic', 'isArabic')
+      .addSelect(
+        '(definition.likeCount - definition.dislikeCount)',
+        'totalLikes',
+      )
+      .addSelect('word.arabicWord', 'arabicWord')
+      .addSelect('word.francoArabicWord', 'francoArabicWord')
+      .addSelect('MAX(definition.definition)', 'definition')
       .groupBy('definition.wordId')
+      .addGroupBy('definition.isArabic')
+      .orderBy('totalLikes', 'DESC')
       .getRawMany();
   }
 
