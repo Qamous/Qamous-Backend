@@ -47,4 +47,8 @@ export class Definition {
 
   @Column({ default: 0 })
   dislikeCount: number;
+
+  // The number of times a definition has been reported as inappropriate / incorrect.
+  @Column({ default: 0 })
+  reportCount: number;
 }
