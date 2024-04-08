@@ -18,35 +18,39 @@ export class DefinitionsService {
 
   async getMostLikedDefinitions(): Promise<any[]> {
     const ret = await this.definitionsRepository.query(`
-      WITH RankedDefinitions AS (
-        SELECT 
-            definition.definition,
-            definition.likeCount,
-            definition.dislikeCount,
-            (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
-            definition.isArabic,
-            word.arabicWord,
-            word.reportCount,
-            ROW_NUMBER() OVER(PARTITION BY word.id, definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS RowNum
-        FROM 
-            definitions AS definition
-        LEFT JOIN 
-            words AS word ON definition.wordId = word.id
-      )
-      SELECT 
-          definition,
-          likeCount,
-          dislikeCount,
-          likeDislikeDifference,
-          isArabic,
-          arabicWord,
-          reportCount
-      FROM 
-          RankedDefinitions
-      WHERE 
-          RowNum = 1
-      ORDER BY 
-          likeDislikeDifference DESC;
+        WITH RankedDefinitions AS (
+            SELECT
+                definition.definition,
+                definition.likeCount,
+                definition.dislikeCount,
+                (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
+                definition.isArabic,
+                word.arabicWord,
+                word.reportCount AS wordReportCount,
+                definition.reportCount AS definitionReportCount,
+                ROW_NUMBER() OVER(PARTITION BY word.id, definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS RowNum
+            FROM
+                definitions AS definition
+                    LEFT JOIN
+                words AS word ON definition.wordId = word.id
+            WHERE
+                word.reportCount <= 5 AND definition.reportCount <= 5
+        )
+        SELECT
+            definition,
+            likeCount,
+            dislikeCount,
+            likeDislikeDifference,
+            isArabic,
+            arabicWord,
+            wordReportCount,
+            definitionReportCount
+        FROM
+            RankedDefinitions
+        WHERE
+            RowNum = 1
+        ORDER BY
+            likeDislikeDifference DESC;
     `);
 
     console.log(ret);
