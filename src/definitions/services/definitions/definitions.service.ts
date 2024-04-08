@@ -16,23 +16,41 @@ export class DefinitionsService {
     return this.definitionsRepository.find();
   }
 
-  async getMostLikedDefinitions(): Promise<Definition[]> {
-    return this.definitionsRepository
-      .createQueryBuilder('definition')
-      .leftJoinAndSelect('definition.word', 'word')
-      .select('definition.wordId', 'wordId')
-      .addSelect('definition.isArabic', 'isArabic')
-      .addSelect(
-        '(definition.likeCount - definition.dislikeCount)',
-        'totalLikes',
+  async getMostLikedDefinitions(): Promise<any[]> {
+    const ret = await this.definitionsRepository.query(`
+      WITH RankedDefinitions AS (
+        SELECT 
+            definition.definition,
+            definition.likeCount,
+            definition.dislikeCount,
+            (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
+            definition.isArabic,
+            word.arabicWord,
+            word.reportCount,
+            ROW_NUMBER() OVER(PARTITION BY word.id, definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS RowNum
+        FROM 
+            definitions AS definition
+        LEFT JOIN 
+            words AS word ON definition.wordId = word.id
       )
-      .addSelect('word.arabicWord', 'arabicWord')
-      .addSelect('word.francoArabicWord', 'francoArabicWord')
-      .addSelect('MAX(definition.definition)', 'definition')
-      .groupBy('definition.wordId')
-      .addGroupBy('definition.isArabic')
-      .orderBy('totalLikes', 'DESC')
-      .getRawMany();
+      SELECT 
+          definition,
+          likeCount,
+          dislikeCount,
+          likeDislikeDifference,
+          isArabic,
+          arabicWord,
+          reportCount
+      FROM 
+          RankedDefinitions
+      WHERE 
+          RowNum = 1
+      ORDER BY 
+          likeDislikeDifference DESC;
+    `);
+
+    console.log(ret);
+    return ret;
   }
 
   async getDefinitionById(id: number): Promise<Definition> {
