@@ -25,7 +25,10 @@ export class DefinitionsService {
                 definition.dislikeCount,
                 (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
                 definition.isArabic,
-                word.arabicWord,
+                CASE
+                    WHEN definition.isArabic = 1 THEN word.arabicWord
+                    ELSE word.francoArabicWord
+                    END AS word,
                 word.reportCount AS wordReportCount,
                 definition.reportCount AS definitionReportCount,
                 ROW_NUMBER() OVER(PARTITION BY word.id, definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS RowNum
@@ -42,7 +45,7 @@ export class DefinitionsService {
             dislikeCount,
             likeDislikeDifference,
             isArabic,
-            arabicWord,
+            word,
             wordReportCount,
             definitionReportCount
         FROM
