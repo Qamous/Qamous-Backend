@@ -38,7 +38,13 @@ export class DefinitionsService {
                 words AS word ON definition.wordId = word.id
             WHERE
                 word.reportCount <= 5 AND definition.reportCount <= 5
-        )
+        ),
+             RandomRows AS (
+                 SELECT *
+                 FROM RankedDefinitions
+                 ORDER BY RAND()
+                 LIMIT 40
+             )
         SELECT
             definition,
             likeCount,
@@ -49,11 +55,12 @@ export class DefinitionsService {
             wordReportCount,
             definitionReportCount
         FROM
-            RankedDefinitions
+            RandomRows
         WHERE
             RowNum = 1
         ORDER BY
             likeDislikeDifference DESC;
+
     `);
 
     return ret;
