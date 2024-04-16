@@ -56,7 +56,6 @@ export class DefinitionsService {
             likeDislikeDifference DESC;
     `);
 
-    console.log(ret);
     return ret;
   }
 
