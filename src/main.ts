@@ -16,7 +16,7 @@ async function bootstrap() {
   // Set up the session middleware
   app.use(
     session({
-      secret: process.env.SESSION_SECRET,
+      secret: 'abc123',
       resave: false,
       saveUninitialized: false,
       cookie: {
