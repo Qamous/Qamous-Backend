@@ -83,4 +83,12 @@ export class UsersService {
       where: { id },
     });
   }
+
+  async validateUser(username: string, password: string): Promise<User> {
+    const user = await this.usersRepository.findOne({ where: { username } });
+    if (user && user.password === newPasswordHashing(password)) {
+      return user;
+    }
+    return null;
+  }
 }
