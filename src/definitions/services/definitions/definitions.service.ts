@@ -25,6 +25,7 @@ export class DefinitionsService {
                 definition.dislikeCount,
                 (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
                 definition.isArabic,
+                word.id AS wordId,
                 CASE
                     WHEN definition.isArabic = 1 THEN word.arabicWord
                     ELSE word.francoArabicWord
@@ -38,14 +39,9 @@ export class DefinitionsService {
                 words AS word ON definition.wordId = word.id
             WHERE
                 word.reportCount <= 5 AND definition.reportCount <= 5
-        ),
-             RandomRows AS (
-                 SELECT *
-                 FROM RankedDefinitions
-                 ORDER BY RAND()
-                 LIMIT 40
-             )
+        )
         SELECT
+            wordId,
             definition,
             likeCount,
             dislikeCount,
@@ -55,12 +51,11 @@ export class DefinitionsService {
             wordReportCount,
             definitionReportCount
         FROM
-            RandomRows
+            RankedDefinitions
         WHERE
             RowNum = 1
         ORDER BY
             likeDislikeDifference DESC;
-
     `);
 
     return ret;
