@@ -1,6 +1,6 @@
 export class CreateDefinitionDto {
-  wordID: number;
-  userID: number;
+  wordId: number;
+  userId: number;
   definition: string;
   example: string;
   isArabic: boolean;
