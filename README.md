@@ -10,14 +10,14 @@ definitions.
 
 
 ## Technologies Used
-- **Nest.js**: A progressive Node.js framework for building efficient, reliable, and scalable server-side applications.
-- **MySQL**: A popular open-source relational database management system used for storing and managing data.
-- **TypeORM**: An Object-Relational Mapping (ORM) library for TypeScript and JavaScript that simplifies database 
+- **Nest.js**: A TypeScript-based Node.js framework.
+- **MySQL**: An open-source relational database management system.
+- **TypeORM**: An Object-Relational Mapping (ORM) library that simplifies database 
 interactions.
-- **Node.js**: A JavaScript runtime environment for building server-side and networking applications.
 - **REST API**: Follows the Representational State Transfer architectural style for designing networked applications.
 - **Jest**: The testing framework used for unit and integration tests.
-- Might wanna use **Passport.js** and **Express Session**.
+- **Express Session**: A middleware for Express.js that manages session state in a Node.js application.
+- **Passport.js**: An authentication middleware for Node.js that supports a lot of authentication strategies.
 
 
 ## Setup Instructions
