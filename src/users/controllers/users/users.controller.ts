@@ -142,7 +142,7 @@ export class UsersController {
     if (updateUserDto.oldPassword) {
       const user: User = await this.usersService.findUserById(id);
       // if old password is incorrect, throw an error
-      if (!verifyPassword(user.password, updateUserDto.oldPassword)) {
+      if (!(await verifyPassword(updateUserDto.oldPassword, user.password))) {
         throw new HttpException(
           'Old password is incorrect',
           HttpStatus.BAD_REQUEST,
