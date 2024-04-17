@@ -3,7 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
 import { DeleteResult, Repository, UpdateResult } from 'typeorm';
 import { CreateUserParams, UpdateUserParams } from '../../../utils/types';
-import { newPasswordHashing } from '../../../../safe/new-password-hashing';
+import {
+  newPasswordHashing,
+  verifyPassword,
+} from '../../../../safe/new-password-hashing';
 
 @Injectable()
 export class UsersService {
@@ -86,7 +89,7 @@ export class UsersService {
 
   async validateUser(username: string, password: string): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { username } });
-    if (user && user.password === newPasswordHashing(password)) {
+    if (user && (await verifyPassword(password, user.password))) {
       return user;
     }
     return null;
