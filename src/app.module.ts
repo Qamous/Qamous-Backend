@@ -19,7 +19,6 @@ import { WordReport } from './typeorm/entities/word-report';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './authentication/controllers/authentication/authentication.controller';
 import { LocalStrategy } from './local.strategy';
-//import { LocalStrategy } from './local.strategy';
 
 dotenv.config({ path: './safe/.env' });
 
