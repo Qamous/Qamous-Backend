@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as serveStatic from 'serve-static';
 import * as cors from 'cors';
-import process from 'process';
+import * as process from 'process';
 import * as session from 'express-session';
 import * as passport from 'passport';
 
@@ -13,16 +13,36 @@ async function bootstrap() {
   app.use('/sitemap.xml', serveStatic('utils/sitemap.xml'));
   app.use(cors({ origin: 'http://localhost:3001', credentials: true }));
 
+  console.log('process.env.HOST: ' + process.env.HOST);
+  const mysqlStore = require('express-mysql-session')(session);
+  const APP_PORT = process.env.APP_PORT || 3000;
+  const IN_PROD = process.env.NODE_ENV === 'production';
+  const TEN_MINUTES = 1000 * 60 * 10;
+
+  const options = {
+    connectionLimit: 10,
+    host: process.env.HOST,
+    port: parseInt(process.env.PORT), // db port
+    user: process.env.USER,
+    password: process.env.PASSWORD,
+    database: process.env.DATABASE,
+    createDatabaseTable: true,
+  };
+
+  const sessionStore = new mysqlStore(options);
+
   // Set up the session middleware
   app.use(
     session({
-      secret: 'abc123',
+      name: process.env.SESS_NAME,
+      secret: process.env.SESS_SECRET,
       resave: false,
       saveUninitialized: false,
+      store: sessionStore,
       cookie: {
         httpOnly: true,
-        secure: true,
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+        secure: IN_PROD, // TODO: require HTTPS in production
+        maxAge: TEN_MINUTES,
       },
     }),
   );
