@@ -15,7 +15,10 @@ import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
-import { verifyPassword } from '../../../../safe/new-password-hashing';
+import {
+  newPasswordHashing,
+  verifyPassword,
+} from '../../../../safe/new-password-hashing';
 import { validateFields } from '../../utils/validation';
 
 @Controller('users')
@@ -75,13 +78,14 @@ export class UsersController {
     // TODO: on the front end, make sure to protect from sql injection
     // make sure old password is correct
     await this.verifyOldPassword(id, updateUserDto);
-    // validation
-    this.httpValidateFields(updateUserDto);
     // remove the old password from the object
     delete updateUserDto.oldPassword;
+    // validation
+    this.httpValidateFields(updateUserDto);
     // if the password is being updated, verify the password confirmation
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
     this.passwordConfirmation(passwordConfirmation, newUserDetails.password);
+    newUserDetails.password = await newPasswordHashing(newUserDetails.password);
     return await this.usersService.updateUser(id, newUserDetails);
   }
 
