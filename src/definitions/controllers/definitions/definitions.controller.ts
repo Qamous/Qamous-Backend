@@ -12,6 +12,7 @@ import { Definition } from '../../../typeorm/entities/definition';
 import { CreateDefinitionDto } from '../../dtos/create-definition.dto';
 import { UpdateDefinitionDto } from '../../dtos/update-definition.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('definitions')
 export class DefinitionsController {
@@ -23,6 +24,7 @@ export class DefinitionsController {
   }
 
   @Get('most-liked')
+  @Throttle({ default: { limit: 15, ttl: 60000 } }) // 15 requests per minute
   async getMostLikedDefinitions(): Promise<Definition[]> {
     return this.definitionsService.getMostLikedDefinitions();
   }
