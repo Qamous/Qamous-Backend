@@ -20,19 +20,21 @@ import {
   verifyPassword,
 } from '../../../../safe/new-password-hashing';
 import { validateFields } from '../../utils/validation';
+import { plainToClass } from 'class-transformer';
 
 @Controller('users')
 export class UsersController {
   constructor(private usersService: UsersService) {}
 
   /**
-   * This is a GET request to /users that returns all users
+   * This is a GET request to /users that returns all users (serialized)
    *
    * @returns {Promise<User[]>} - an array of User objects
    */
   @Get()
   async getUsers(): Promise<User[]> {
-    return await this.usersService.findUsers();
+    const users: User[] = await this.usersService.findUsers();
+    return users.map((user) => plainToClass(User, user));
   }
 
   /**
