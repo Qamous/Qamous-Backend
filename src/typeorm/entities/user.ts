@@ -7,12 +7,15 @@ export class User {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
+  @Exclude()
   @Column({ nullable: false })
   firstName: string;
 
+  @Exclude()
   @Column({ nullable: false })
   lastName: string;
 
+  @Exclude()
   @Column({ unique: true, nullable: false })
   email: string;
 
@@ -24,6 +27,7 @@ export class User {
   @Column({ nullable: true })
   password: string;
 
+  @Exclude()
   @Column({ nullable: true })
   dateOfBirth: Date;
 
