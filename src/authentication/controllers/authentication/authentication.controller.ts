@@ -11,6 +11,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Request as ExpressRequest, Response, NextFunction } from 'express';
 import { Session } from 'express-session';
 import { Throttle } from '@nestjs/throttler';
+import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -21,7 +22,7 @@ export class AuthController {
    * @param {e.Request} req - the request object
    * @returns {Promise<Express.User>} - the user object
    */
-  @UseGuards(AuthGuard('local'))
+  @UseGuards(LocalAuthGuard)
   @Throttle({ default: { limit: 5, ttl: 300000 } }) // 5 requests per 5 minutes
   @Post('login')
   async login(@Request() req: ExpressRequest): Promise<Express.User> {
@@ -38,7 +39,7 @@ export class AuthController {
    * @param {e.NextFunction} next - the next function
    * @returns {Promise<{message: string}>} - a message
    */
-  @UseGuards(AuthGuard('local'))
+  @UseGuards(AuthenticatedGuard)
   @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute
   @Post('logout')
   async logout(
@@ -64,7 +65,7 @@ export class AuthController {
    */
   @Get('session')
   @Throttle({ default: { limit: 2, ttl: 60000 } }) // 2 requests per minute
-  @UseGuards(AuthGuard('local'))
+  @UseGuards(AuthenticatedGuard)
   async getAuthSession(
     @Request() req: ExpressRequest,
   ): Promise<{ session: Session; sessionId: string }> {

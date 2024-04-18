@@ -4,6 +4,8 @@ import { AuthController } from './controllers/authentication/authentication.cont
 import { UsersService } from '../users/services/users/users.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../typeorm/entities/user';
+import { LocalStrategy } from '../utils/local.strategy';
+import { SessionSerializer } from '../utils/session.serializer';
 
 @Module({
   imports: [TypeOrmModule.forFeature([User])],
@@ -14,6 +16,8 @@ import { User } from '../typeorm/entities/user';
       useClass: AuthService,
     },
     UsersService,
+    LocalStrategy,
+    SessionSerializer,
   ],
   exports: [
     {
@@ -22,4 +26,4 @@ import { User } from '../typeorm/entities/user';
     },
   ],
 })
-export class AuthenticationModule {}
+export class AuthModule {}

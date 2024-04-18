@@ -6,7 +6,7 @@ import * as session from 'express-session';
 import * as passport from 'passport';
 import { v4 as uuidV4 } from 'uuid';
 
-async function bootstrap() {
+async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   // TODO: update robots.txt and sitemap.xml once we have a domain and we're ready to go live
   app.use('/robots.txt', serveStatic('utils/robots.txt'));
@@ -15,8 +15,8 @@ async function bootstrap() {
 
   const mySqlStore = require('express-mysql-session')(session);
   const APP_PORT = process.env.APP_PORT || 3000;
-  const IN_PROD = process.env.NODE_ENV === 'production';
-  const TEN_MINUTES = 1000 * 60 * 10;
+  const IN_PROD: boolean = process.env.NODE_ENV === 'production';
+  const TEN_MINUTES: number = 1000 * 60 * 10;
 
   const options = {
     connectionLimit: 10,
@@ -56,4 +56,4 @@ async function bootstrap() {
   await app.listen(APP_PORT);
 }
 
-bootstrap();
+bootstrap().catch((err) => console.error(err));

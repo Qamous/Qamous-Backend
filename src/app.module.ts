@@ -20,7 +20,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './authentication/controllers/authentication/authentication.controller';
 import { LocalStrategy } from './utils/local.strategy';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { AuthenticationModule } from './authentication/authentication.module';
+import { AuthModule } from './authentication/authModule';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -49,16 +49,16 @@ dotenv.config({ path: './safe/.env' });
       ],
       synchronize: true,
     }),
-    PassportModule,
+    PassportModule.register({ session: true }),
     UsersModule,
     CountriesModule,
     WordsModule,
     DefinitionsModule,
     DefinitionLikesDislikesModule,
     WordReportsModule,
-    AuthenticationModule,
+    AuthModule,
   ],
   controllers: [AppController, AuthController],
-  providers: [AppService, LocalStrategy],
+  providers: [AppService],
 })
 export class AppModule {}
