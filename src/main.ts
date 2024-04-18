@@ -5,7 +5,6 @@ import * as cors from 'cors';
 import * as session from 'express-session';
 import * as passport from 'passport';
 import { v4 as uuidV4 } from 'uuid';
-import { Request as ExpressRequest } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
