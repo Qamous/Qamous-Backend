@@ -2,9 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as serveStatic from 'serve-static';
 import * as cors from 'cors';
-import * as process from 'process';
 import * as session from 'express-session';
 import * as passport from 'passport';
+import { v4 as uuidV4 } from 'uuid';
+import { Request as ExpressRequest } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,8 +14,7 @@ async function bootstrap() {
   app.use('/sitemap.xml', serveStatic('utils/sitemap.xml'));
   app.use(cors({ origin: 'http://localhost:3001', credentials: true }));
 
-  console.log('process.env.HOST: ' + process.env.HOST);
-  const mysqlStore = require('express-mysql-session')(session);
+  const mySqlStore = require('express-mysql-session')(session);
   const APP_PORT = process.env.APP_PORT || 3000;
   const IN_PROD = process.env.NODE_ENV === 'production';
   const TEN_MINUTES = 1000 * 60 * 10;
@@ -29,12 +29,15 @@ async function bootstrap() {
     createDatabaseTable: true,
   };
 
-  const sessionStore = new mysqlStore(options);
+  const sessionStore = new mySqlStore(options);
 
   // Set up the session middleware
   app.use(
     session({
       name: process.env.SESS_NAME,
+      genid: function () {
+        return uuidV4();
+      },
       secret: process.env.SESS_SECRET,
       resave: false,
       saveUninitialized: false,
@@ -51,7 +54,7 @@ async function bootstrap() {
   app.use(passport.initialize());
   app.use(passport.session());
 
-  await app.listen(3000);
+  await app.listen(APP_PORT);
 }
 
 bootstrap();
