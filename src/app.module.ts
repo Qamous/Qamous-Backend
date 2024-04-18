@@ -19,11 +19,18 @@ import { WordReport } from './typeorm/entities/word-report';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './authentication/controllers/authentication/authentication.controller';
 import { LocalStrategy } from './local.strategy';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 dotenv.config({ path: './safe/.env' });
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 seconds
+        limit: 10, // limit each IP to 10 requests per ttl
+      },
+    ]),
     TypeOrmModule.forRoot({
       type: 'mysql',
       host: process.env.HOST,
