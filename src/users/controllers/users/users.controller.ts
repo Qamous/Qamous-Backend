@@ -38,21 +38,22 @@ export class UsersController {
   }
 
   /**
-   * This is a GET request to /users/:id that returns a user by their id
+   * This is a GET request to /users/:id that returns a (serialized) user by their id
    *
    * @param {number} id - the id of the user to return
    * @returns {Promise<User>} - the User object with the specified id
    */
   @Get(':id')
   async getUserById(@Param('id', ParseIntPipe) id: number): Promise<User> {
-    return await this.usersService.findUserById(id);
+    const user: User = await this.usersService.findUserById(id);
+    return plainToClass(User, user);
   }
 
   /**
    * This is a POST request to /users that creates a new user
    *
    * @param {CreateUserDto} createUserDto - a CreateUserDto object that contains the details of the new user
-   * @returns {Promise<User>} - the newly created User object
+   * @returns {Promise<User>} - the newly created User object (serialized)
    */
   @Post('register')
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
@@ -62,7 +63,9 @@ export class UsersController {
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
     this.passwordConfirmation(passwordConfirmation, userDetails.password);
-    return await this.usersService.createUser(userDetails);
+
+    const user: User = await this.usersService.createUser(userDetails);
+    return plainToClass(User, user);
   }
 
   /**
