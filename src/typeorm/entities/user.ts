@@ -1,4 +1,5 @@
 import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Exclude, Expose } from 'class-transformer';
 import { Country } from './country';
 
 @Entity({ name: 'users' })
@@ -15,9 +16,11 @@ export class User {
   @Column({ unique: true, nullable: false })
   email: string;
 
+  @Expose()
   @Column({ unique: true, nullable: false })
   username: string;
 
+  @Exclude()
   @Column({ nullable: true })
   password: string;
 
