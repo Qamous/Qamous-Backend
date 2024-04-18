@@ -1,4 +1,12 @@
-import { Controller, Request, Post, UseGuards, Get } from '@nestjs/common';
+import {
+  Controller,
+  Request,
+  Post,
+  UseGuards,
+  Get,
+  Next,
+  Res,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request as ExpressRequest, Response, NextFunction } from 'express';
 import { Session } from 'express-session';
@@ -28,15 +36,15 @@ export class AuthController {
    * @param {e.Request} req - the request object
    * @param {e.Response} res - the response object
    * @param {e.NextFunction} next - the next function
-   * @returns {Promise<{ message: string }>} - a message object
+   * @returns {Promise<{message: string}>} - a message
    */
   @UseGuards(AuthGuard('local'))
   @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute
   @Post('logout')
   async logout(
     @Request() req: ExpressRequest,
-    res: Response,
-    next: NextFunction,
+    @Res() res: Response,
+    @Next() next: NextFunction,
   ): Promise<{ message: string }> {
     req.logout(function (err) {
       if (err) {

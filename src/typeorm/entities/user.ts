@@ -4,6 +4,7 @@ import { Country } from './country';
 
 @Entity({ name: 'users' })
 export class User {
+  @Exclude()
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
@@ -19,7 +20,6 @@ export class User {
   @Column({ unique: true, nullable: false })
   email: string;
 
-  @Expose()
   @Column({ unique: true, nullable: false })
   username: string;
 
@@ -31,6 +31,7 @@ export class User {
   @Column({ nullable: true })
   dateOfBirth: Date;
 
+  @Exclude() // TODO: temporary
   @Column({ nullable: true, type: 'blob' })
   profilePicture: Buffer;
   // TODO: should be a later feature... so everyone gets a null profile picture at first

@@ -18,8 +18,9 @@ import { DefinitionLikeDislike } from './typeorm/entities/definition-like-dislik
 import { WordReport } from './typeorm/entities/word-report';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './authentication/controllers/authentication/authentication.controller';
-import { LocalStrategy } from './local.strategy';
+import { LocalStrategy } from './utils/local.strategy';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { AuthenticationModule } from './authentication/authentication.module';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -55,8 +56,9 @@ dotenv.config({ path: './safe/.env' });
     DefinitionsModule,
     DefinitionLikesDislikesModule,
     WordReportsModule,
+    AuthenticationModule,
   ],
   controllers: [AppController, AuthController],
-  providers: [AppService, LocalStrategy], // add LocalStrategy
+  providers: [AppService, LocalStrategy],
 })
 export class AppModule {}
