@@ -7,7 +7,6 @@ import {
   Next,
   Res,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { Request as ExpressRequest, Response, NextFunction } from 'express';
 import { Session } from 'express-session';
 import { Throttle } from '@nestjs/throttler';
