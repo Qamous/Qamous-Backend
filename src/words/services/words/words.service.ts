@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository, UpdateResult } from 'typeorm';
 import { CreateWordParams } from '../../../utils/types';
 import { UpdateWordDto } from '../../dtos/update-word.dto';
+import { User } from '../../../typeorm/entities/user';
 
 @Injectable()
 export class WordsService {
@@ -15,29 +16,40 @@ export class WordsService {
    * This creates a new word according to the details provided in the Word object
    * and returns the newly created word
    *
+   * @param {User} user - the user object
    * @param {Partial<Word>} wordDetails - the details of the new word
    * @returns {Promise<Word>} - the newly created Word object
    */
-  async addWord(wordDetails: CreateWordParams): Promise<Word> {
-    const newWord = this.wordsRepository.create({
+  async addWord(user: User, wordDetails: CreateWordParams): Promise<Word> {
+    const newWord: Word = this.wordsRepository.create({
       ...wordDetails,
       createdAt: new Date(),
     });
+    newWord.userId = user.id;
     return await this.wordsRepository.save(newWord);
   }
 
   /**
    * This updates a word by its id
    *
+   * @param {User} user - the user object
    * @param {number} wordID - the id of the word to update
    * @param {UpdateWordDto} updateWordDto - a UpdateWordDto object that contains the
    * details of the word to replace the existing word
    * @returns {Promise<UpdateResult>} - the update result
    */
   async updateWord(
+    user: User,
     wordID: number,
     updateWordDto: UpdateWordDto,
   ): Promise<UpdateResult> {
+    const word: Word = await this.findWordById(wordID);
+    if (!word) {
+      throw new Error('Word not found');
+    }
+    if (word.userId !== user.id) {
+      throw new Error('Unauthorized');
+    }
     return await this.wordsRepository.update(wordID, updateWordDto);
   }
 

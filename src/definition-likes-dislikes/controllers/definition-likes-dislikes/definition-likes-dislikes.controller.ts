@@ -1,5 +1,15 @@
-import { Controller, Post, Get, Delete, Param, Body } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Param,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { DefinitionLikesDislikesService } from '../../services/definition-likes-dislikes/definition-likes-dislikes.service';
+import { LocalAuthGuard } from '../../../utils/local.guard';
+import { RequestType } from 'express-serve-static-core';
 
 @Controller('reactions')
 export class DefinitionLikesDislikesController {
@@ -7,64 +17,68 @@ export class DefinitionLikesDislikesController {
     private readonly definitionLikesDislikesService: DefinitionLikesDislikesService,
   ) {}
 
-  @Post(':definitionID/likes')
+  @UseGuards(LocalAuthGuard)
+  @Post(':definitionID/like')
   async likeDefinition(
-    @Param('definitionID') definitionID: string,
-    @Body('userID') userID: string,
+    @Request() req: RequestType,
+    @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.likeDefinition(
+      req.user,
       definitionID,
-      userID,
     );
   }
 
-  @Post(':definitionID/dislikes')
+  @UseGuards(LocalAuthGuard)
+  @Post(':definitionID/dislike')
   async dislikeDefinition(
-    @Param('definitionID') definitionID: string,
-    @Body('userID') userID: string,
+    @Request() req: RequestType,
+    @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.dislikeDefinition(
+      req.user,
       definitionID,
-      userID,
     );
   }
 
   @Get(':definitionID/likes-dislikes')
-  async getLikesDislikes(@Param('definitionID') definitionID: string) {
+  async getLikesDislikes(@Param('definitionID') definitionID: number) {
     return await this.definitionLikesDislikesService.getLikesDislikes(
       definitionID,
     );
   }
 
   @Get(':definitionID/likes')
-  async getLikes(@Param('definitionID') definitionID: string) {
+  async getLikes(@Param('definitionID') definitionID: number) {
     return await this.definitionLikesDislikesService.getLikes(definitionID);
   }
 
   @Get(':definitionID/dislikes')
-  async getDislikes(@Param('definitionID') definitionID: string) {
+  async getDislikes(@Param('definitionID') definitionID: number) {
     return await this.definitionLikesDislikesService.getDislikes(definitionID);
   }
 
+  @UseGuards(LocalAuthGuard)
   @Delete(':definitionID/likes/:userID')
   async removeLike(
-    @Param('definitionID') definitionID: string,
-    @Param('userID') userID: string,
+    @Request() req: RequestType,
+    @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.removeLike(
+      req.user,
       definitionID,
-      userID,
     );
   }
 
+  @UseGuards(LocalAuthGuard)
   @Delete(':definitionID/dislikes/:userID')
   async removeDislike(
-    @Param('definitionID') definitionID: string,
-    @Param('userID') userID: string,
+    @Request() req: RequestType,
+    @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.removeDislike(
+      req.user,
       definitionID,
-      userID,
     );
   }
 }

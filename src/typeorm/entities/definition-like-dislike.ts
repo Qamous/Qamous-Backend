@@ -6,10 +6,10 @@ export class DefinitionLikeDislike {
   id: number;
 
   @Column()
-  definitionID: string;
+  definitionID: number;
 
   @Column()
-  userID: string;
+  userID: number;
 
   @Column()
   liked: boolean;

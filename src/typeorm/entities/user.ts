@@ -1,6 +1,14 @@
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-import { Exclude, Expose } from 'class-transformer';
+import {
+  Column,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+import { Exclude } from 'class-transformer';
 import { Country } from './country';
+import { Definition } from './definition';
+import { Word } from './word';
 
 @Entity({ name: 'users' })
 export class User {
@@ -44,4 +52,10 @@ export class User {
 
   @ManyToOne(() => Country)
   country: Country;
+
+  @OneToMany(() => Definition, (definition) => definition.user)
+  definitions: Definition[];
+
+  @OneToMany(() => Word, (word) => word.user)
+  words: Word[];
 }

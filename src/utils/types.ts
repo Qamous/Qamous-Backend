@@ -1,3 +1,5 @@
+import { User } from '../typeorm/entities/user';
+
 export type CreateUserParams = {
   firstName: string;
   lastName: string;
@@ -38,3 +40,10 @@ export type CreateWordParams = {
 export type CreateDefinitionParams = {
   // TODO: Define the properties of the CreateDefinitionParams type
 };
+
+// This is so that TypeScript knows that the Request object can have a user property of type User
+declare module 'express-serve-static-core' {
+  interface RequestType extends Request {
+    user?: User;
+  }
+}

@@ -14,6 +14,7 @@ async function bootstrap(): Promise<void> {
   app.use(cors({ origin: 'http://localhost:3001', credentials: true }));
 
   const mySqlStore = require('express-mysql-session')(session);
+  // TODO: Should I switch to a TypeORM store (https://www.youtube.com/watch?v=7DEByCGk4rQ&list=PL_cUvD4qzbkw-phjGK2qq0nQiG6gw1cKK&index=22&ab_channel=AnsontheDeveloper)?
   const APP_PORT = process.env.APP_PORT || 3000;
   const IN_PROD: boolean = process.env.NODE_ENV === 'production';
   const TEN_MINUTES: number = 1000 * 60 * 10;

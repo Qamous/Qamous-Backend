@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { Word } from './word';
 import { User } from './user';
+import { Exclude } from 'class-transformer';
 
 @Entity({ name: 'definitions' })
 export class Definition {
@@ -19,7 +20,7 @@ export class Definition {
   @JoinColumn({ name: 'wordId' })
   word: Word;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, (user) => user.definitions)
   @JoinColumn({ name: 'userId' })
   user: User;
 
@@ -49,6 +50,7 @@ export class Definition {
   dislikeCount: number;
 
   // The number of times a definition has been reported as inappropriate / incorrect.
+  @Exclude()
   @Column({ default: 0 })
   reportCount: number;
 }

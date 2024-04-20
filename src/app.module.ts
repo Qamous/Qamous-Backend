@@ -17,10 +17,10 @@ import { Definition } from './typeorm/entities/definition';
 import { DefinitionLikeDislike } from './typeorm/entities/definition-like-dislike';
 import { WordReport } from './typeorm/entities/word-report';
 import { PassportModule } from '@nestjs/passport';
-import { AuthController } from './authentication/controllers/authentication/authentication.controller';
+import { AuthController } from './authentication/controllers/authentication/auth.controller';
 import { LocalStrategy } from './utils/local.strategy';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { AuthModule } from './authentication/authModule';
+import { AuthModule } from './authentication/auth.module';
 
 dotenv.config({ path: './safe/.env' });
 

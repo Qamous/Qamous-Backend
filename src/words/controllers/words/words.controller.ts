@@ -1,9 +1,20 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { WordsService } from '../../services/words/words.service';
 import { Word } from '../../../typeorm/entities/word';
 import { CreateWordDto } from '../../dtos/create-word.dto';
 import { UpdateWordDto } from '../../dtos/update-word.dto';
 import { UpdateResult } from 'typeorm';
+import { LocalAuthGuard } from '../../../utils/local.guard';
+import { RequestType } from 'express-serve-static-core';
 
 @Controller('word')
 export class WordsController {
@@ -13,28 +24,36 @@ export class WordsController {
    * This is a POST request to /word/add that creates a new word according to the details provided in the
    * CreateWordDto object and returns the newly created word
    *
+   * @param {RequestType} req - the request object
    * @param {CreateWordDto} wordDetails - the details of the new word
    * @returns {Promise<Word>} - the newly created Word object
    */
+  @UseGuards(LocalAuthGuard)
   @Post('')
-  async addWord(@Body() wordDetails: CreateWordDto): Promise<Word> {
-    return await this.wordsService.addWord(wordDetails);
+  async addWord(
+    @Req() req: RequestType,
+    @Body() wordDetails: CreateWordDto,
+  ): Promise<Word> {
+    return await this.wordsService.addWord(req.user, wordDetails);
   }
 
   /**
    * This is a PATCH request to /word/:wordID that updates a word by its id
    *
+   * @param {RequestType} req - the request object
    * @param {number} wordID - the id of the word to update
    * @param {UpdateWordDto} updateWordDto - a UpdateWordDto object that contains the
    * details of the word to replace the existing word
    * @returns {Promise<UpdateResult>} - the update result
    */
+  @UseGuards(LocalAuthGuard)
   @Patch(':wordID')
   async updateWord(
+    @Req() req: RequestType,
     @Param('wordID') wordID: number,
     @Body() updateWordDto: UpdateWordDto,
   ): Promise<UpdateResult> {
-    return await this.wordsService.updateWord(wordID, updateWordDto);
+    return await this.wordsService.updateWord(req.user, wordID, updateWordDto);
   }
 
   /**

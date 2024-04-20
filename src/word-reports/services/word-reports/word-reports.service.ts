@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { WordReport } from '../../../typeorm/entities/word-report';
 import { Repository } from 'typeorm';
@@ -18,19 +18,26 @@ export class WordReportsService {
   ) {}
 
   async createWordReport(
+    user: User,
     createWordReportDto: CreateWordReportDto,
   ): Promise<WordReport> {
-    const word = await this.wordRepository.findOne({
+    const word: Word = await this.wordRepository.findOne({
       where: { id: createWordReportDto.wordID },
     });
-    const reportingUser = await this.userRepository.findOne({
-      where: { id: createWordReportDto.userReportingID },
+    const reportingUser: User = await this.userRepository.findOne({
+      where: { id: user.id },
     });
-    const reportedUser = await this.userRepository.findOne({
+    if (!reportingUser) {
+      throw new HttpException('Unauthorized', 401);
+    }
+    const reportedUser: User = await this.userRepository.findOne({
       where: { id: createWordReportDto.userReportedID },
     });
+    if (!reportedUser) {
+      throw new HttpException('Reported user not found', 404);
+    }
 
-    const newWordReport = new WordReport();
+    const newWordReport: WordReport = new WordReport();
     newWordReport.word = word;
     newWordReport.reportingUser = reportingUser;
     newWordReport.reportedUser = reportedUser;
@@ -57,7 +64,16 @@ export class WordReportsService {
     });
   }
 
-  async deleteWordReport(id: number): Promise<void> {
+  async deleteWordReport(user: User, id: number): Promise<void> {
+    const wordReport: WordReport = await this.wordReportsRepository.findOne({
+      where: { id },
+    });
+    if (!wordReport) {
+      throw new HttpException('Word report not found', 404);
+    }
+    if (wordReport.reportingUser.id !== user.id) {
+      throw new HttpException('Unauthorized', 401);
+    }
     await this.wordReportsRepository.delete(id);
   }
 }

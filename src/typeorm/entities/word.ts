@@ -1,10 +1,25 @@
-import { Column, Entity, ManyToMany, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToMany,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { Country } from './country';
+import { User } from './user';
 
 @Entity({ name: 'words' })
 export class Word {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
+
+  @ManyToOne(() => User, (user: User) => user.words)
+  @JoinColumn({ name: 'userId' })
+  user: User;
+
+  @Column({ nullable: false })
+  userId: number;
 
   // Not using { unique: true } because there may be words that are spelled the
   // same but have different meanings in different languages

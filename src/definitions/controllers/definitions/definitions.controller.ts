@@ -6,6 +6,8 @@ import {
   Param,
   Patch,
   Post,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { DefinitionsService } from '../../services/definitions/definitions.service';
 import { Definition } from '../../../typeorm/entities/definition';
@@ -13,6 +15,9 @@ import { CreateDefinitionDto } from '../../dtos/create-definition.dto';
 import { UpdateDefinitionDto } from '../../dtos/update-definition.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
 import { Throttle } from '@nestjs/throttler';
+import { AuthenticatedGuard } from '../../../utils/local.guard';
+import { RequestType } from 'express-serve-static-core';
+import { User } from '../../../typeorm/entities/user';
 
 @Controller('definitions')
 export class DefinitionsController {
@@ -34,26 +39,38 @@ export class DefinitionsController {
     return this.definitionsService.getDefinitionById(id);
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Post()
   async createDefinition(
+    @Req() req: RequestType,
     @Body() createDefinitionDto: CreateDefinitionDto,
   ): Promise<Definition> {
-    return this.definitionsService.createDefinition(createDefinitionDto);
+    return this.definitionsService.createDefinition(
+      req.user,
+      createDefinitionDto,
+    );
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Patch(':id')
   async updateDefinitionById(
+    @Req() req: RequestType,
     @Param('id') id: number,
     @Body() updateDefinitionDto: UpdateDefinitionDto,
   ): Promise<UpdateResult> {
     return this.definitionsService.updateDefinitionById(
+      req.user,
       id,
       updateDefinitionDto,
     );
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  async deleteDefinitionById(@Param('id') id: number): Promise<DeleteResult> {
-    return this.definitionsService.deleteDefinitionById(id);
+  async deleteDefinitionById(
+    @Req() req: RequestType,
+    @Param('id') id: number,
+  ): Promise<DeleteResult> {
+    return this.definitionsService.deleteDefinitionById(req.user, id);
   }
 }
