@@ -36,6 +36,7 @@ export class DefinitionsService {
     const ret = await this.definitionsRepository.query(`
         WITH RankedDefinitions AS (
             SELECT
+                definition.id,
                 definition.definition,
                 definition.likeCount,
                 definition.dislikeCount,
@@ -59,6 +60,7 @@ export class DefinitionsService {
         SELECT
             wordId,
             definition,
+            id as definitionId,
             likeCount,
             dislikeCount,
             likeDislikeDifference,
@@ -132,5 +134,18 @@ export class DefinitionsService {
     }
 
     return this.definitionsRepository.delete(id);
+  }
+
+  async getDefinitionCountryById(id: number): Promise<Country> {
+    const definition = await this.definitionsRepository.findOne({
+      where: { id },
+      relations: ['country'],
+    });
+
+    if (!definition) {
+      throw new HttpException('Definition not found', HttpStatus.NOT_FOUND);
+    }
+
+    return definition.country;
   }
 }
