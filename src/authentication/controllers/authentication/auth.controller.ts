@@ -25,7 +25,6 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 300000 } }) // 5 requests per 5 minutes
   @Post('login')
   async login(@Request() req: ExpressRequest): Promise<Express.User> {
-    console.log(req);
     // Passport automatically attaches user to the request object
     return req.user;
   }
