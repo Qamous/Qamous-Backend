@@ -17,7 +17,7 @@ import { DeleteResult, UpdateResult } from 'typeorm';
 import { Throttle } from '@nestjs/throttler';
 import { AuthenticatedGuard } from '../../../utils/local.guard';
 import { RequestType } from 'express-serve-static-core';
-import { User } from '../../../typeorm/entities/user';
+import { Country } from '../../../typeorm/entities/country';
 
 @Controller('definitions')
 export class DefinitionsController {
@@ -72,5 +72,10 @@ export class DefinitionsController {
     @Param('id') id: number,
   ): Promise<DeleteResult> {
     return this.definitionsService.deleteDefinitionById(req.user, id);
+  }
+
+  @Get(':id/country')
+  async getDefinitionCountryById(@Param('id') id: number): Promise<Country> {
+    return this.definitionsService.getDefinitionCountryById(id);
   }
 }
