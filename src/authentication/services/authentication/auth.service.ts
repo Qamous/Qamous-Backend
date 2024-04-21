@@ -6,8 +6,8 @@ import { User } from '../../../typeorm/entities/user';
 export class AuthService {
   constructor(private readonly userService: UsersService) {}
 
-  async validateUser(username: string, password: string): Promise<User> {
-    const user: User = await this.userService.validateUser(username, password);
+  async validateUser(email: string, password: string): Promise<User> {
+    const user: User = await this.userService.validateUser(email, password);
     if (!user) {
       throw new UnauthorizedException();
     }
