@@ -2,6 +2,7 @@ import {
   Column,
   Entity,
   JoinColumn,
+  JoinTable,
   ManyToMany,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -31,7 +32,8 @@ export class Word {
   francoArabicWord: string;
 
   @ManyToMany(() => Country)
-  countriesOfUse: Country[];
+  @JoinTable()
+  countries: Country[];
 
   @Column()
   createdAt: Date;

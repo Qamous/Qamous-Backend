@@ -1,14 +1,18 @@
 import {
+  AfterLoad,
   Column,
   CreateDateColumn,
   Entity,
   JoinColumn,
+  JoinTable,
+  ManyToMany,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Word } from './word';
 import { User } from './user';
 import { Exclude } from 'class-transformer';
+import { Country } from './country';
 
 @Entity({ name: 'definitions' })
 export class Definition {
@@ -24,11 +28,18 @@ export class Definition {
   @JoinColumn({ name: 'userId' })
   user: User;
 
+  @ManyToOne(() => Country)
+  @JoinColumn({ name: 'countryCode' })
+  country: Country;
+
   @Column({ nullable: false })
   wordId: number;
 
   @Column({ nullable: false })
   userId: number;
+
+  @Column({ nullable: true, type: 'char', length: 2 })
+  countryCode: string;
 
   @Column({ nullable: false, length: 10000 })
   definition: string;

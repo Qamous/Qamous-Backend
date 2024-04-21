@@ -5,19 +5,34 @@ import { Repository, DeleteResult, UpdateResult } from 'typeorm';
 import { CreateDefinitionDto } from '../../dtos/create-definition.dto';
 import { UpdateDefinitionDto } from '../../dtos/update-definition.dto';
 import { User } from '../../../typeorm/entities/user';
+import { Country } from '../../../typeorm/entities/country';
+
+type MostLikedDefinition = {
+  wordId: number;
+  definition: string;
+  likeCount: number;
+  dislikeCount: number;
+  likeDislikeDifference: number;
+  isArabic: boolean;
+  word: string;
+  wordReportCount: number;
+  definitionReportCount: number;
+};
 
 @Injectable()
 export class DefinitionsService {
   constructor(
     @InjectRepository(Definition)
     private definitionsRepository: Repository<Definition>,
+    @InjectRepository(Country)
+    private countriesRepository: Repository<Country>,
   ) {}
 
   async getDefinitions(): Promise<Definition[]> {
     return this.definitionsRepository.find();
   }
 
-  async getMostLikedDefinitions(): Promise<any[]> {
+  async getMostLikedDefinitions(): Promise<Definition[]> {
     const ret = await this.definitionsRepository.query(`
         WITH RankedDefinitions AS (
             SELECT
@@ -72,9 +87,18 @@ export class DefinitionsService {
     user: User,
     createDefinitionDto: CreateDefinitionDto,
   ): Promise<Definition> {
-    const newDefinition =
-      this.definitionsRepository.create(createDefinitionDto);
+    const { countryCode, ...rest } = createDefinitionDto;
+    const newDefinition: Definition = this.definitionsRepository.create(rest);
     newDefinition.user = user;
+
+    // Find the country
+    const country: Country = await this.countriesRepository.findOne({
+      where: { countryCode },
+    });
+
+    // Assign the countries to the definition
+    newDefinition.country = country;
+
     return this.definitionsRepository.save(newDefinition);
   }
 
