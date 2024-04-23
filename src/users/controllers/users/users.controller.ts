@@ -63,7 +63,7 @@ export class UsersController {
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
     this.passwordConfirmation(passwordConfirmation, userDetails.password);
-
+    userDetails.password = await newPasswordHashing(userDetails.password);
     const user: User = await this.usersService.createUser(userDetails);
     return plainToClass(User, user);
   }
