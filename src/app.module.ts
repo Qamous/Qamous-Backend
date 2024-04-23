@@ -18,7 +18,6 @@ import { DefinitionLikeDislike } from './typeorm/entities/definition-like-dislik
 import { WordReport } from './typeorm/entities/word-report';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './authentication/controllers/authentication/auth.controller';
-import { LocalStrategy } from './utils/local.strategy';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './authentication/auth.module';
 import { MailerModule } from '@nestjs-modules/mailer';
