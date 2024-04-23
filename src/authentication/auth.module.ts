@@ -6,9 +6,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../typeorm/entities/user';
 import { LocalStrategy } from '../utils/local.strategy';
 import { SessionSerializer } from '../utils/session.serializer';
+import { JwtModule } from '@nestjs/jwt';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User])],
+  imports: [JwtModule, TypeOrmModule.forFeature([User])],
   controllers: [AuthController],
   providers: [
     {
