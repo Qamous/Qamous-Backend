@@ -54,6 +54,9 @@ export class UsersService {
     id: number,
     updateUserDetails: UpdateUserParams,
   ): Promise<UpdateResult> {
+    // updateUserDetails.password = await newPasswordHashing(
+    //   updateUserDetails.password,
+    // );
     const result = await this.usersRepository.update(
       { id },
       { ...updateUserDetails },
