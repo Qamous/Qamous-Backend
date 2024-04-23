@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../../typeorm/entities/user';
 import { DeleteResult, Repository, UpdateResult } from 'typeorm';
@@ -8,11 +8,16 @@ import {
   verifyPassword,
 } from '../../../../safe/new-password-hashing';
 import { plainToClass } from 'class-transformer';
+import { randomBytes } from 'crypto';
+import { MailerService } from '@nestjs-modules/mailer';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User) private usersRepository: Repository<User>,
+    private mailerService: MailerService,
+    private jwtService: JwtService,
   ) {}
 
   /**
@@ -94,7 +99,7 @@ export class UsersService {
   /**
    * This validates a user by their username and password and returns the user if they are valid.
    *
-   * @param {string} email - the email of the user to validate
+   * @param {string} username - the username of the user to validate
    * @param {string} password - the password of the user to validate
    * @returns {Promise<User>} - the User object if the user is valid, otherwise null
    */
@@ -104,5 +109,66 @@ export class UsersService {
       return plainToClass(User, user);
     }
     return null;
+  }
+
+  async resetPassword(email: string): Promise<void> {
+    const user = await this.usersRepository.findOne({ where: { email } });
+
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    const payload = { userId: user.id };
+    const token = this.jwtService.sign(payload, { expiresIn: '1h' });
+
+    await this.sendPasswordResetEmail(email, token);
+  }
+
+  async updatePassword(token: string, newPassword: string): Promise<void> {
+    let decodedToken;
+
+    try {
+      decodedToken = this.jwtService.verify(token);
+    } catch (err) {
+      throw new HttpException(
+        'Invalid or expired token',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (!decodedToken) {
+      throw new HttpException(
+        'Invalid or expired token',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const user = await this.usersRepository.findOne(decodedToken.userId);
+
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    user.password = await newPasswordHashing(newPassword);
+
+    await this.usersRepository.save(user);
+  }
+
+  private generateResetToken(): string {
+    return randomBytes(20).toString('hex');
+  }
+
+  async sendPasswordResetEmail(email: string, token: string): Promise<void> {
+    await this.mailerService.sendMail({
+      to: email, // list of receivers
+      from: process.env.EMAIL_USERNAME, // sender address
+      subject: 'Password Reset', // Subject line
+      template: 'password-reset', // The name of the template file
+      context: {
+        // Data to be sent to template engine.
+        token,
+        email,
+      },
+    });
   }
 }

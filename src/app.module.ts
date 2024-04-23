@@ -21,6 +21,8 @@ import { AuthController } from './authentication/controllers/authentication/auth
 import { LocalStrategy } from './utils/local.strategy';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './authentication/auth.module';
+import { MailerModule } from '@nestjs-modules/mailer';
+import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -48,6 +50,27 @@ dotenv.config({ path: './safe/.env' });
         WordReport,
       ],
       synchronize: true,
+    }),
+    MailerModule.forRoot({
+      transport: {
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false, // upgrade later with STARTTLS
+        auth: {
+          user: process.env.EMAIL_USERNAME,
+          pass: process.env.EMAIL_PASSWORD,
+        },
+      },
+      defaults: {
+        from: '"nest-modules" <modules@nestjs.com>',
+      },
+      template: {
+        dir: __dirname + '/templates',
+        adapter: new HandlebarsAdapter(),
+        options: {
+          strict: true,
+        },
+      },
     }),
     PassportModule.register({ session: true }),
     UsersModule,

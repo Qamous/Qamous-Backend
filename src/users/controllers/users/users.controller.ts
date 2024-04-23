@@ -179,4 +179,17 @@ export class UsersController {
   ): Promise<DeleteResult> {
     return await this.usersService.deleteUser(id);
   }
+
+  @Post('reset-password')
+  async resetPassword(@Body('email') email: string): Promise<void> {
+    return this.usersService.resetPassword(email);
+  }
+
+  @Post('reset-password/:token')
+  async updatePassword(
+    @Param('token') token: string,
+    @Body('newPassword') newPassword: string,
+  ): Promise<void> {
+    return this.usersService.updatePassword(token, newPassword);
+  }
 }
