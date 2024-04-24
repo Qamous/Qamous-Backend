@@ -46,6 +46,7 @@ async function bootstrap(): Promise<void> {
         httpOnly: true,
         secure: IN_PROD, // TODO: require HTTPS in production
         maxAge: TEN_MINUTES,
+        sameSite: 'lax', // TODO: SameSite is 'lax' or 'strict' for local testing, do the research for production
       },
     }),
   );
