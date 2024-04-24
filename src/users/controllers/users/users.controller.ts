@@ -180,11 +180,24 @@ export class UsersController {
     return await this.usersService.deleteUser(id);
   }
 
+  /**
+   * This is a POST request to /users/reset-password that sends a reset password email
+   *
+   * @param {string} email - the email of the user to reset the password for
+   * @returns {Promise<void>}
+   */
   @Post('reset-password')
   async resetPassword(@Body('email') email: string): Promise<void> {
     return this.usersService.resetPassword(email);
   }
 
+  /**
+   * This is a POST request to /users/reset-password/:token that updates the password of a user
+   *
+   * @param {string} token - the token of the user to update the password for
+   * @param {string} newPassword - the new password
+   * @returns {Promise<void>}
+   */
   @Post('reset-password/:token')
   async updatePassword(
     @Param('token') token: string,
