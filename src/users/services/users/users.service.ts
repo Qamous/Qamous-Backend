@@ -124,7 +124,7 @@ export class UsersService {
   }
 
   async updatePassword(token: string, newPassword: string): Promise<void> {
-    let decodedToken;
+    let decodedToken: { userId: number };
 
     try {
       decodedToken = this.jwtService.verify(token);
@@ -134,7 +134,6 @@ export class UsersService {
         HttpStatus.BAD_REQUEST,
       );
     }
-
     if (!decodedToken) {
       throw new HttpException(
         'Invalid or expired token',
@@ -142,7 +141,9 @@ export class UsersService {
       );
     }
 
-    const user = await this.usersRepository.findOne(decodedToken.userId);
+    const user: User = await this.usersRepository.findOne({
+      where: { id: decodedToken.userId },
+    });
 
     if (!user) {
       throw new HttpException('User not found', HttpStatus.NOT_FOUND);
