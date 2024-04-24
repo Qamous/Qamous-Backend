@@ -16,8 +16,8 @@ import { JwtService } from '@nestjs/jwt';
 export class UsersService {
   constructor(
     @InjectRepository(User) private usersRepository: Repository<User>,
-    private mailerService: MailerService,
-    private jwtService: JwtService,
+    private readonly mailerService: MailerService,
+    private readonly jwtService: JwtService,
   ) {}
 
   /**
@@ -112,15 +112,14 @@ export class UsersService {
   }
 
   async resetPassword(email: string): Promise<void> {
-    const user = await this.usersRepository.findOne({ where: { email } });
+    const user: User = await this.usersRepository.findOne({ where: { email } });
 
     if (!user) {
       throw new HttpException('User not found', HttpStatus.NOT_FOUND);
     }
 
     const payload = { userId: user.id };
-    const token = this.jwtService.sign(payload, { expiresIn: '1h' });
-
+    const token: string = this.jwtService.sign(payload, { expiresIn: '1h' });
     await this.sendPasswordResetEmail(email, token);
   }
 
