@@ -54,6 +54,7 @@ async function bootstrap(): Promise<void> {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // TODO: should I add Helmet?
   await app.listen(APP_PORT);
 }
 
