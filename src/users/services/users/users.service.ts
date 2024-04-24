@@ -119,7 +119,7 @@ export class UsersService {
     }
 
     const payload = { userId: user.id };
-    const token: string = this.jwtService.sign(payload, { expiresIn: '1h' });
+    const token: string = this.jwtService.sign(payload, { expiresIn: '15m' });
     await this.sendPasswordResetEmail(email, token);
   }
 
