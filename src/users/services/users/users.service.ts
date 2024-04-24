@@ -140,6 +140,7 @@ export class UsersService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    // TODO: make tokens expire when used
 
     const user: User = await this.usersRepository.findOne({
       where: { id: decodedToken.userId },
