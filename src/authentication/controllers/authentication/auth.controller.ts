@@ -64,7 +64,7 @@ export class AuthController {
    */
   @Get('session')
   @Throttle({ default: { limit: 2, ttl: 60000 } }) // 2 requests per minute
-  @UseGuards(AuthenticatedGuard)
+  //@UseGuards(AuthenticatedGuard)
   async getAuthSession(
     @Request() req: ExpressRequest,
   ): Promise<{ session: Session; sessionId: string }> {
