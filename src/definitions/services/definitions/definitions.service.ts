@@ -42,6 +42,7 @@ export class DefinitionsService {
                 definition.dislikeCount,
                 (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
                 definition.isArabic,
+                definition.countryCode,
                 word.id AS wordId,
                 CASE
                     WHEN definition.isArabic = 1 THEN word.arabicWord
@@ -65,6 +66,7 @@ export class DefinitionsService {
             dislikeCount,
             likeDislikeDifference,
             isArabic,
+            countryCode,
             word,
             wordReportCount,
             definitionReportCount
