@@ -61,6 +61,58 @@ export class DefinitionLikesDislikesService {
       wordId: definition.wordId,
       id: definition.id,
       AddedTimestamp: definition.AddedTimestamp,
+      dislikeCount: definition.dislikeCount + 1,
+    };
+    await this.definitionsService.updateDefinitionById(
+      user,
+      definitionId,
+      updateDefinitionDto,
+    );
+  }
+
+  async unlikeDefinition(user: User, definitionId: number) {
+    const like = await this.definitionLikesDislikesRepository.findOne({
+      where: { definitionId, userId: user.id, liked: true },
+    });
+
+    if (!like) {
+      throw new Error('Like not found');
+    }
+
+    await this.definitionLikesDislikesRepository.remove(like);
+
+    const definition =
+      await this.definitionsService.getDefinitionById(definitionId);
+    const updateDefinitionDto: UpdateDefinitionDto = {
+      wordId: definition.wordId,
+      id: definition.id,
+      AddedTimestamp: definition.AddedTimestamp,
+      likeCount: definition.likeCount - 1,
+    };
+    await this.definitionsService.updateDefinitionById(
+      user,
+      definitionId,
+      updateDefinitionDto,
+    );
+  }
+
+  async undislikeDefinition(user: User, definitionId: number) {
+    const dislike = await this.definitionLikesDislikesRepository.findOne({
+      where: { definitionId, userId: user.id, liked: false },
+    });
+
+    if (!dislike) {
+      throw new Error('Dislike not found');
+    }
+
+    await this.definitionLikesDislikesRepository.remove(dislike);
+
+    const definition =
+      await this.definitionsService.getDefinitionById(definitionId);
+    const updateDefinitionDto: UpdateDefinitionDto = {
+      wordId: definition.wordId,
+      id: definition.id,
+      AddedTimestamp: definition.AddedTimestamp,
       dislikeCount: definition.dislikeCount - 1,
     };
     await this.definitionsService.updateDefinitionById(
