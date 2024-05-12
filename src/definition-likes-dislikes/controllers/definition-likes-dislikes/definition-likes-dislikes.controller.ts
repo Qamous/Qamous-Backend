@@ -42,6 +42,30 @@ export class DefinitionLikesDislikesController {
     );
   }
 
+  @UseGuards(AuthenticatedGuard)
+  @Post(':definitionID/unlike')
+  async unlikeDefinition(
+    @Request() req: RequestType,
+    @Param('definitionID') definitionID: number,
+  ) {
+    return await this.definitionLikesDislikesService.unlikeDefinition(
+      req.user,
+      definitionID,
+    );
+  }
+
+  @UseGuards(AuthenticatedGuard)
+  @Post(':definitionID/undislike')
+  async undislikeDefinition(
+    @Request() req: RequestType,
+    @Param('definitionID') definitionID: number,
+  ) {
+    return await this.definitionLikesDislikesService.undislikeDefinition(
+      req.user,
+      definitionID,
+    );
+  }
+
   @Get(':definitionID/likes-dislikes')
   async getLikesDislikes(@Param('definitionID') definitionID: number) {
     return await this.definitionLikesDislikesService.getLikesDislikes(
