@@ -32,7 +32,7 @@ export type UpdateCountryParams = {
 
 export type CreateWordParams = {
   arabicWord: string;
-  FrancoArabicWord: string;
+  francoArabicWord: string;
   CountriesOfUse: string[];
   createdAt: Date;
 };

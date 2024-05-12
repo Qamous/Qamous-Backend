@@ -1,6 +1,6 @@
 export class CreateWordDto {
   arabicWord: string;
-  FrancoArabicWord: string;
+  francoArabicWord: string;
   CountriesOfUse: string[];
   createdAt: Date;
 }
