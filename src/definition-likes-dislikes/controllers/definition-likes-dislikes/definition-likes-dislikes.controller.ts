@@ -8,7 +8,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { DefinitionLikesDislikesService } from '../../services/definition-likes-dislikes/definition-likes-dislikes.service';
-import { LocalAuthGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
 import { RequestType } from 'express-serve-static-core';
 
 @Controller('reactions')
@@ -17,19 +17,20 @@ export class DefinitionLikesDislikesController {
     private readonly definitionLikesDislikesService: DefinitionLikesDislikesService,
   ) {}
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Post(':definitionID/like')
   async likeDefinition(
     @Request() req: RequestType,
     @Param('definitionID') definitionID: number,
   ) {
+    console.log(definitionID);
     return await this.definitionLikesDislikesService.likeDefinition(
       req.user,
       definitionID,
     );
   }
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Post(':definitionID/dislike')
   async dislikeDefinition(
     @Request() req: RequestType,
