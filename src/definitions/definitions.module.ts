@@ -9,5 +9,6 @@ import { Country } from '../typeorm/entities/country';
   imports: [TypeOrmModule.forFeature([Definition, Country])], // DefinitionRepository is provided here
   controllers: [DefinitionsController],
   providers: [DefinitionsService],
+  exports: [DefinitionsService],
 })
 export class DefinitionsModule {}
