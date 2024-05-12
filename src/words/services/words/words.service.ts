@@ -5,11 +5,13 @@ import { Like, Repository, UpdateResult } from 'typeorm';
 import { CreateWordParams } from '../../../utils/types';
 import { UpdateWordDto } from '../../dtos/update-word.dto';
 import { User } from '../../../typeorm/entities/user';
+import { Country } from '../../../typeorm/entities/country';
 
 @Injectable()
 export class WordsService {
   constructor(
     @InjectRepository(Word) private wordsRepository: Repository<Word>,
+    @InjectRepository(Country) private countryRepository: Repository<Country>,
   ) {}
 
   /**
@@ -21,12 +23,38 @@ export class WordsService {
    * @returns {Promise<Word>} - the newly created Word object
    */
   async addWord(user: User, wordDetails: CreateWordParams): Promise<Word> {
-    const newWord: Word = this.wordsRepository.create({
-      ...wordDetails,
-      createdAt: new Date(),
+    // Check if a word with the same Arabic word already exists
+    const existingWord: Word = await this.wordsRepository.findOne({
+      where: { arabicWord: wordDetails.arabicWord },
     });
-    newWord.userId = user.id;
-    return await this.wordsRepository.save(newWord);
+
+    if (existingWord) {
+      // If the FrancoArabic word is also the same, return the existing word
+      if (existingWord.francoArabicWord === wordDetails.francoArabicWord) {
+        return existingWord;
+      }
+      // If the Arabic word is the same but the FrancoArabic word is different, update the FrancoArabic word of the existing word
+      else {
+        existingWord.francoArabicWord = wordDetails.francoArabicWord;
+        return await this.wordsRepository.save(existingWord);
+      }
+    }
+    // If no word with the same Arabic word exists, save the new word
+    else {
+      const newWord: Word = this.wordsRepository.create({
+        ...wordDetails,
+        createdAt: new Date(),
+      });
+      newWord.userId = user.id;
+
+      // Fetch the country entities from the database
+      const countries: Country[] = await this.countryRepository.findByIds(
+        wordDetails.CountriesOfUse,
+      );
+      newWord.countries = countries;
+
+      return await this.wordsRepository.save(newWord);
+    }
   }
 
   /**

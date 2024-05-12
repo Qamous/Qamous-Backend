@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Req,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { WordsService } from '../../services/words/words.service';
@@ -13,7 +14,7 @@ import { Word } from '../../../typeorm/entities/word';
 import { CreateWordDto } from '../../dtos/create-word.dto';
 import { UpdateWordDto } from '../../dtos/update-word.dto';
 import { UpdateResult } from 'typeorm';
-import { LocalAuthGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard } from '../../../utils/local.guard';
 import { RequestType } from 'express-serve-static-core';
 
 @Controller('word')
@@ -28,10 +29,10 @@ export class WordsController {
    * @param {CreateWordDto} wordDetails - the details of the new word
    * @returns {Promise<Word>} - the newly created Word object
    */
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Post('')
   async addWord(
-    @Req() req: RequestType,
+    @Request() req: RequestType,
     @Body() wordDetails: CreateWordDto,
   ): Promise<Word> {
     return await this.wordsService.addWord(req.user, wordDetails);
@@ -46,10 +47,10 @@ export class WordsController {
    * details of the word to replace the existing word
    * @returns {Promise<UpdateResult>} - the update result
    */
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Patch(':wordID')
   async updateWord(
-    @Req() req: RequestType,
+    @Request() req: RequestType,
     @Param('wordID') wordID: number,
     @Body() updateWordDto: UpdateWordDto,
   ): Promise<UpdateResult> {
