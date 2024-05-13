@@ -4,5 +4,5 @@ export class CreateDefinitionDto {
   example: string;
   isArabic: boolean;
   createdAt: Date;
-  countryCode: string;
+  countryName: string;
 }

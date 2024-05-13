@@ -91,13 +91,19 @@ export class DefinitionsService {
     user: User,
     createDefinitionDto: CreateDefinitionDto,
   ): Promise<Definition> {
-    const { countryCode, ...rest } = createDefinitionDto;
+    const { countryName, ...rest } = createDefinitionDto;
     const newDefinition: Definition = this.definitionsRepository.create(rest);
     newDefinition.user = user;
 
+    let modifiedCountryName = countryName;
+
+    if (modifiedCountryName != null && modifiedCountryName.charAt(0) === ' ') {
+      modifiedCountryName = modifiedCountryName.substring(1);
+    }
+
     // Find the country
     const country: Country = await this.countriesRepository.findOne({
-      where: { countryCode },
+      where: { countryName: modifiedCountryName },
     });
 
     // Assign the countries to the definition
