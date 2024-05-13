@@ -50,6 +50,10 @@ export class AuthController {
       if (err) {
         return next(err);
       }
+
+      // Clear the session cookie
+      req.session = null;
+
       res.redirect('/');
     });
     return { message: 'Logged out successfully' };

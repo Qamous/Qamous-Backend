@@ -104,7 +104,9 @@ export class UsersService {
    * @returns {Promise<User>} - the User object if the user is valid, otherwise null
    */
   async validateUser(username: string, password: string): Promise<User> {
-    const user = await this.usersRepository.findOne({ where: { username } });
+    const user: User = await this.usersRepository.findOne({
+      where: { username },
+    });
     if (user && (await verifyPassword(password, user.password))) {
       return plainToClass(User, user);
     }

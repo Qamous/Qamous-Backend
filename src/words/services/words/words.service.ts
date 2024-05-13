@@ -58,10 +58,10 @@ export class WordsService {
       newWord.userId = user.id;
 
       // Fetch the country entities from the database
-      const countries: Country[] = await this.countryRepository.findByIds(
-        wordDetails.CountriesOfUse,
-      );
-      newWord.countries = countries;
+      // const countries: Country[] = await this.countryRepository.findByIds(
+      //   wordDetails.CountriesOfUse,
+      // );
+      // newWord.countries = countries;
 
       return await this.wordsRepository.save(newWord);
     }
