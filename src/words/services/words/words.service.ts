@@ -29,7 +29,15 @@ export class WordsService {
     });
 
     if (existingWord) {
+      if (existingWord.francoArabicWord === '') {
+        existingWord.francoArabicWord = wordDetails.francoArabicWord;
+        return await this.wordsRepository.save(existingWord);
+      }
+      return existingWord;
+      /*
+      
       // If the FrancoArabic word is also the same, return the existing word
+      
       if (existingWord.francoArabicWord === wordDetails.francoArabicWord) {
         return existingWord;
       }
@@ -38,6 +46,8 @@ export class WordsService {
         existingWord.francoArabicWord = wordDetails.francoArabicWord;
         return await this.wordsRepository.save(existingWord);
       }
+      
+      */
     }
     // If no word with the same Arabic word exists, save the new word
     else {
