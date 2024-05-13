@@ -105,6 +105,9 @@ export class DefinitionsService {
     const country: Country = await this.countriesRepository.findOne({
       where: { countryName: modifiedCountryName },
     });
+    if (!country) {
+      throw new HttpException('Country not found', HttpStatus.NOT_FOUND);
+    }
 
     // Assign the countries to the definition
     newDefinition.country = country;

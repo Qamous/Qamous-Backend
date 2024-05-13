@@ -12,7 +12,6 @@ import { Word } from './word';
 
 @Entity({ name: 'users' })
 export class User {
-  @Exclude()
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
