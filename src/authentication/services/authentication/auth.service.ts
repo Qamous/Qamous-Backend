@@ -9,7 +9,7 @@ export class AuthService {
   async validateUser(username: string, password: string): Promise<User> {
     const user: User = await this.userService.validateUser(username, password);
     if (!user) {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException('Invalid credentials');
     }
     return user;
   }
