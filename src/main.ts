@@ -48,6 +48,7 @@ async function bootstrap(): Promise<void> {
         maxAge: TEN_MINUTES,
         sameSite: 'lax', // TODO: SameSite is 'lax' or 'strict' for local testing, do the research for production
       },
+      rolling: true, // Reset the maxAge on every request
     }),
   );
 
