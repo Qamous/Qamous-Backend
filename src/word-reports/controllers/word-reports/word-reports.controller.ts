@@ -12,14 +12,14 @@ import {
 import { WordReport } from '../../../typeorm/entities/word-report';
 import { WordReportsService } from '../../services/word-reports/word-reports.service';
 import { CreateWordReportDto } from '../../dtos/create-word-report.dto';
-import { LocalAuthGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard } from '../../../utils/local.guard';
 import { RequestType } from 'express-serve-static-core';
 
 @Controller('word-reports')
 export class WordReportsController {
   constructor(private wordReportsService: WordReportsService) {}
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Post()
   async createWordReport(
     @Request() req: RequestType,
@@ -31,13 +31,13 @@ export class WordReportsController {
     );
   }
 
-  @UseGuards(LocalAuthGuard) // Everything is excluded anyway
+  @UseGuards(AuthenticatedGuard) // Everything is excluded anyway
   @Get()
   async getWordReports(): Promise<WordReport[]> {
     return await this.wordReportsService.getWordReports();
   }
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Get('word/:id')
   async getWordReportsByWordId(
     @Param('id', ParseIntPipe) wordId: number,
@@ -45,7 +45,7 @@ export class WordReportsController {
     return await this.wordReportsService.getWordReportsByWordId(wordId);
   }
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Get(':id')
   async getWordReportById(
     @Param('id', ParseIntPipe) id: number,
@@ -53,7 +53,7 @@ export class WordReportsController {
     return await this.wordReportsService.getWordReportById(id);
   }
 
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(AuthenticatedGuard)
   @Delete(':id')
   async deleteWordReport(
     @Request() req: RequestType,
