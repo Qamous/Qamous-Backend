@@ -22,6 +22,8 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './authentication/auth.module';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
+import { DefinitionReportsController } from './definition-reports/controllers/definition-reports/definition-reports.controller';
+import { DefinitionReportsModule } from './definition-reports/definition-reports.module';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -81,8 +83,9 @@ dotenv.config({ path: './safe/.env' });
     DefinitionLikesDislikesModule,
     WordReportsModule,
     AuthModule,
+    DefinitionReportsModule,
   ],
-  controllers: [AppController, AuthController],
+  controllers: [AppController, AuthController, DefinitionReportsController],
   providers: [AppService],
 })
 export class AppModule {}
