@@ -19,19 +19,17 @@ export class WordReportsService {
 
   async createWordReport(
     user: User,
-    createWordReportDto: CreateWordReportDto,
+    reportDetails: CreateWordReportDto,
   ): Promise<WordReport> {
-    const { wordID, reportText } = createWordReportDto; // Change wordId to wordID
     const word: Word = await this.wordRepository.findOne({
-      where: { id: wordID }, // Change wordId to wordID
+      where: { id: reportDetails.wordId }, // Change wordId to wordID
     });
     if (!word) {
       throw new HttpException('Word not found', 404);
     }
     const newReport: WordReport = this.wordReportsRepository.create({
+      ...reportDetails,
       userId: user.id,
-      wordId: wordID, // Change wordId to wordID
-      reportText,
       createdAt: new Date(),
     });
     return await this.wordReportsRepository.save(newReport);

@@ -1,4 +1,4 @@
 export class CreateDefinitionReportDto {
-  reportedDefinitionId: number;
+  definitionId: number;
   reportText: string;
 }

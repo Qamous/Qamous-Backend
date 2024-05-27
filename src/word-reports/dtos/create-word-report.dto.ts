@@ -1,4 +1,4 @@
 export class CreateWordReportDto {
-  wordID: number;
+  wordId: number;
   reportText: string;
 }
