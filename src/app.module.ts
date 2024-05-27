@@ -24,6 +24,7 @@ import { MailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
 import { DefinitionReportsController } from './definition-reports/controllers/definition-reports/definition-reports.controller';
 import { DefinitionReportsModule } from './definition-reports/definition-reports.module';
+import { DefinitionReport } from './typeorm/entities/definition-report';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -49,6 +50,7 @@ dotenv.config({ path: './safe/.env' });
         Definition,
         DefinitionLikeDislike,
         WordReport,
+        DefinitionReport,
       ],
       synchronize: true,
     }),
