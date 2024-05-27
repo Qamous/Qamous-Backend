@@ -90,6 +90,7 @@ export class DefinitionsService {
   async getDefinitionsByUserId(userId: number): Promise<Definition[]> {
     return this.definitionsRepository.find({
       where: { userId },
+      relations: ['word'],
     });
   }
 
@@ -101,7 +102,7 @@ export class DefinitionsService {
     const newDefinition: Definition = this.definitionsRepository.create(rest);
     newDefinition.user = user;
 
-    let modifiedCountryName = countryName;
+    let modifiedCountryName: string = countryName;
 
     if (modifiedCountryName != null && modifiedCountryName.charAt(0) === ' ') {
       modifiedCountryName = modifiedCountryName.substring(1);
