@@ -21,31 +21,20 @@ export class WordReportsService {
     user: User,
     createWordReportDto: CreateWordReportDto,
   ): Promise<WordReport> {
+    const { wordID, reportText } = createWordReportDto; // Change wordId to wordID
     const word: Word = await this.wordRepository.findOne({
-      where: { id: createWordReportDto.wordID },
+      where: { id: wordID }, // Change wordId to wordID
     });
-    const reportingUser: User = await this.userRepository.findOne({
-      where: { id: user.id },
-    });
-    if (!reportingUser) {
-      throw new HttpException('Unauthorized', 401);
+    if (!word) {
+      throw new HttpException('Word not found', 404);
     }
-    const reportedUser: User = await this.userRepository.findOne({
-      where: { id: createWordReportDto.userReportedID },
+    const newReport: WordReport = this.wordReportsRepository.create({
+      userId: user.id,
+      wordId: wordID, // Change wordId to wordID
+      reportText,
+      createdAt: new Date(),
     });
-    if (!reportedUser) {
-      throw new HttpException('Reported user not found', 404);
-    }
-
-    const newWordReport: WordReport = new WordReport();
-    newWordReport.word = word;
-    newWordReport.reportingUser = reportingUser;
-    newWordReport.reportedUser = reportedUser;
-    newWordReport.reportText = createWordReportDto.reportText;
-    newWordReport.AddedTimestamp = createWordReportDto.createdAt;
-
-    await this.wordReportsRepository.save(newWordReport);
-    return newWordReport;
+    return await this.wordReportsRepository.save(newReport);
   }
 
   async getWordReports(): Promise<WordReport[]> {
@@ -53,27 +42,14 @@ export class WordReportsService {
   }
 
   async getWordReportsByWordId(wordId: number): Promise<WordReport[]> {
-    return await this.wordReportsRepository.find({
-      where: { word: { id: wordId } },
-    });
+    return await this.wordReportsRepository.find({ where: { wordId } });
   }
 
   async getWordReportById(id: number): Promise<WordReport> {
-    return await this.wordReportsRepository.findOne({
-      where: { id },
-    });
+    return await this.wordReportsRepository.findOne({ where: { id } });
   }
 
-  async deleteWordReport(user: User, id: number): Promise<void> {
-    const wordReport: WordReport = await this.wordReportsRepository.findOne({
-      where: { id },
-    });
-    if (!wordReport) {
-      throw new HttpException('Word report not found', 404);
-    }
-    if (wordReport.reportingUser.id !== user.id) {
-      throw new HttpException('Unauthorized', 401);
-    }
-    await this.wordReportsRepository.delete(id);
+  async deleteWordReport(id: number): Promise<void> {
+    await this.wordReportsRepository.delete({ id });
   }
 }

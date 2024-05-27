@@ -55,10 +55,7 @@ export class WordReportsController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  async deleteWordReport(
-    @Request() req: RequestType,
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<void> {
-    return await this.wordReportsService.deleteWordReport(req.user, id);
+  async deleteWordReport(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    return await this.wordReportsService.deleteWordReport(id);
   }
 }

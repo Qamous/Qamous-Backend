@@ -1,4 +1,11 @@
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { Word } from './word';
 import { User } from './user';
 import { Exclude } from 'class-transformer';
@@ -10,22 +17,25 @@ export class WordReport {
   id: number;
 
   @Exclude()
-  @ManyToOne(() => Word)
-  word: Word;
-
-  @Exclude()
   @ManyToOne(() => User)
+  @JoinColumn({ name: 'userId' })
   reportingUser: User;
 
-  @Exclude()
-  @ManyToOne(() => User)
-  reportedUser: User;
+  @Column({ nullable: false })
+  userId: number;
+
+  @ManyToOne(() => Word)
+  @JoinColumn({ name: 'wordId' })
+  reportedWord: Word;
+
+  @Column({ nullable: false })
+  wordId: number;
 
   @Exclude()
-  @Column({ nullable: false })
+  @Column({ nullable: false, type: 'text' })
   reportText: string;
 
   @Exclude()
-  @Column({ nullable: false })
-  AddedTimestamp: Date;
+  @CreateDateColumn()
+  createdAt: Date;
 }
