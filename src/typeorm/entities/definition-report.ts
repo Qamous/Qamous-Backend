@@ -4,26 +4,31 @@ import {
   Column,
   ManyToOne,
   CreateDateColumn,
+  JoinColumn,
 } from 'typeorm';
 import { User } from './user';
 import { Definition } from './definition';
 import { Exclude } from 'class-transformer';
 
-@Entity({ name: 'definition_reports' })
+@Entity({ name: 'definition-reports' })
 export class DefinitionReport {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
   @Exclude()
-  @ManyToOne(() => User, (user) => user.id)
+  @ManyToOne(() => User)
+  @JoinColumn({ name: 'userId' })
   reportingUser: User;
 
-  @Exclude()
-  @ManyToOne(() => User, (user) => user.id)
-  reportedUser: User;
+  @Column({ nullable: false })
+  userId: number;
 
-  @ManyToOne(() => Definition, (definition) => definition.id)
+  @ManyToOne(() => Definition)
+  @JoinColumn({ name: 'definitionId' })
   reportedDefinition: Definition;
+
+  @Column({ nullable: false })
+  definitionId: number;
 
   @Exclude()
   @Column({ nullable: false, type: 'text' })
