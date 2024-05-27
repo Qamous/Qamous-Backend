@@ -87,6 +87,12 @@ export class DefinitionsService {
     });
   }
 
+  async getDefinitionsByUserId(userId: number): Promise<Definition[]> {
+    return this.definitionsRepository.find({
+      where: { userId },
+    });
+  }
+
   async createDefinition(
     user: User,
     createDefinitionDto: CreateDefinitionDto,
