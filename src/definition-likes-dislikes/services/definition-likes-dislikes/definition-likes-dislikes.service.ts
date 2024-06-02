@@ -30,7 +30,6 @@ export class DefinitionLikesDislikesService {
     const definition =
       await this.definitionsService.getDefinitionById(definitionId);
     const updateDefinitionDto: UpdateDefinitionDto = {
-      wordId: definition.wordId,
       id: definition.id, // Change definitionId to id
       AddedTimestamp: definition.AddedTimestamp,
       likeCount: definition.likeCount + 1,
@@ -58,7 +57,6 @@ export class DefinitionLikesDislikesService {
     const definition =
       await this.definitionsService.getDefinitionById(definitionId);
     const updateDefinitionDto: UpdateDefinitionDto = {
-      wordId: definition.wordId,
       id: definition.id,
       AddedTimestamp: definition.AddedTimestamp,
       dislikeCount: definition.dislikeCount + 1,
@@ -84,7 +82,6 @@ export class DefinitionLikesDislikesService {
     const definition =
       await this.definitionsService.getDefinitionById(definitionId);
     const updateDefinitionDto: UpdateDefinitionDto = {
-      wordId: definition.wordId,
       id: definition.id,
       AddedTimestamp: definition.AddedTimestamp,
       likeCount: definition.likeCount - 1,
@@ -110,7 +107,6 @@ export class DefinitionLikesDislikesService {
     const definition =
       await this.definitionsService.getDefinitionById(definitionId);
     const updateDefinitionDto: UpdateDefinitionDto = {
-      wordId: definition.wordId,
       id: definition.id,
       AddedTimestamp: definition.AddedTimestamp,
       dislikeCount: definition.dislikeCount - 1,

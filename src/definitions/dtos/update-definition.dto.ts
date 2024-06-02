@@ -1,5 +1,4 @@
 export class UpdateDefinitionDto {
-  wordId: number;
   id: number;
   definition?: string;
   example?: string;

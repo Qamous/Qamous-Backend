@@ -127,7 +127,7 @@ export class DefinitionsService {
     id: number,
     updateDefinitionDto: UpdateDefinitionDto,
   ): Promise<UpdateResult> {
-    const definition = await this.getDefinitionById(id);
+    const definition: Definition = await this.getDefinitionById(id);
 
     if (!definition) {
       throw new HttpException('Definition not found', HttpStatus.NOT_FOUND);
