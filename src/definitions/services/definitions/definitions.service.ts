@@ -32,8 +32,9 @@ export class DefinitionsService {
     return this.definitionsRepository.find();
   }
 
-  async getMostLikedDefinitions(): Promise<Definition[]> {
-    const ret = await this.definitionsRepository.query(`
+  async getMostLikedDefinitions(userId: number): Promise<Definition[]> {
+    const ret = await this.definitionsRepository.query(
+      `
         WITH RankedDefinitions AS (
             SELECT
                 definition.id,
@@ -60,13 +61,13 @@ export class DefinitionsService {
                 words AS word ON definition.wordId = word.id
             LEFT JOIN
                 \`definition-likes-dislikes\` AS liked
-                ON definition.id = liked.definitionId AND liked.userId = 1 AND liked.liked = 1
+                ON definition.id = liked.definitionId AND liked.userId = ? AND liked.liked = 1
             LEFT JOIN
                 \`definition-likes-dislikes\` AS disliked
-                ON definition.id = disliked.definitionId AND disliked.userId = 1 AND disliked.liked = 0
+                ON definition.id = disliked.definitionId AND disliked.userId = ? AND disliked.liked = 0
             LEFT JOIN
                 \`definition-reports\` AS reported
-                ON definition.id = reported.definitionId AND reported.userId = 1
+                ON definition.id = reported.definitionId AND reported.userId = ?
             WHERE
                 word.reportCount <= 5 AND definition.reportCount <= 5
         )
@@ -91,7 +92,9 @@ export class DefinitionsService {
             RowNum = 1
         ORDER BY
             likeDislikeDifference DESC;
-    `);
+    `,
+      [userId, userId, userId],
+    );
 
     return ret;
   }

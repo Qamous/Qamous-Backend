@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpException,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -30,8 +32,13 @@ export class DefinitionsController {
 
   @Get('most-liked')
   @Throttle({ default: { limit: 15, ttl: 60000 } }) // 15 requests per minute
-  async getMostLikedDefinitions(): Promise<Definition[]> {
-    return this.definitionsService.getMostLikedDefinitions();
+  async getMostLikedDefinitions(
+    @Req() req?: RequestType,
+  ): Promise<Definition[]> {
+    let userId: number = req && req.user ? req.user.id : 0;
+    // cast userId to number to prevent SQL injection attacks
+    userId = Number(userId);
+    return this.definitionsService.getMostLikedDefinitions(userId);
   }
 
   @Get(':id')
