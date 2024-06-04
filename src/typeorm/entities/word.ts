@@ -5,10 +5,12 @@ import {
   JoinTable,
   ManyToMany,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Country } from './country';
 import { User } from './user';
+import { Definition } from './definition';
 
 @Entity({ name: 'words' })
 export class Word {
@@ -21,6 +23,9 @@ export class Word {
 
   @Column({ nullable: false })
   userId: number;
+
+  @OneToMany(() => Definition, (definition) => definition.word)
+  definitions: Definition[];
 
   // Not using { unique: true } because there may be words that are spelled the
   // same but have different meanings in different languages
