@@ -172,7 +172,7 @@ export class WordsService {
               ON definition.id = reported.definitionId AND reported.userId = ?
           WHERE
               word.reportCount <= 5 AND definition.reportCount <= 5 AND
-              (word.arabicWord LIKE ? OR word.francoArabicWord LIKE ? OR definition.definition LIKE ?)
+              (word.arabicWord LIKE CONCAT('%', ?, '%') OR word.francoArabicWord LIKE CONCAT('%', ?, '%') OR definition.definition LIKE CONCAT('%', ?, '%'))
       )
       SELECT
           wordId,
