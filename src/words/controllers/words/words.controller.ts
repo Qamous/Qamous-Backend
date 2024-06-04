@@ -96,10 +96,16 @@ export class WordsController {
    * search keyword or contain the search keyword in their word (TODO: or definition).
    *
    * @param {string} keyword - the keyword to search for
+   * @param {RequestType} req - the request object
    * @returns {Promise<Word[]>} - an array of Word objects that match the search keyword
    */
   @Get('search/kwd=:keyword')
-  async searchWords(@Param('keyword') keyword: string): Promise<Word[]> {
-    return await this.wordsService.searchWords(keyword);
+  async searchWords(
+    @Param('keyword') keyword: string,
+    @Req() req?: RequestType,
+  ): Promise<Word[]> {
+    let userId: number = req && req.user ? req.user.id : 0;
+    userId = Number(userId);
+    return await this.wordsService.searchWords(keyword, userId);
   }
 }
