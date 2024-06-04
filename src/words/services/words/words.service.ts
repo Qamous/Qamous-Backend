@@ -134,12 +134,71 @@ export class WordsService {
    * @param {string} keyword - the keyword to search for
    * @returns {Promise<Word[]>} - an array of Word objects that match the search keyword
    */
-  searchWords(keyword: string): Promise<Word[]> {
-    return this.wordsRepository.find({
-      where: [
-        { arabicWord: Like(`%${keyword}%`) },
-        { francoArabicWord: Like(`%${keyword}%`) },
-      ],
-    });
+  async searchWords(keyword: string, userId: number): Promise<Word[]> {
+    const ret = await this.wordsRepository.query(
+      `
+      WITH RankedDefinitions AS (
+          SELECT
+              definition.id,
+              definition.definition,
+              definition.likeCount,
+              definition.dislikeCount,
+              definition.reportCount AS definitionReportCount,
+              (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
+              definition.isArabic,
+              definition.countryCode,
+              word.id AS wordId,
+              CASE
+                  WHEN definition.isArabic = 1 THEN word.arabicWord
+                  ELSE word.francoArabicWord
+                  END AS word,
+              word.reportCount AS wordReportCount,
+              IFNULL(liked.id IS NOT NULL, 0) AS isLiked,
+              IFNULL(disliked.id IS NOT NULL, 0) AS isDisliked,
+              IFNULL(reported.id IS NOT NULL, 0) AS isReported,
+              ROW_NUMBER() OVER(PARTITION BY word.id, definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS RowNum
+          FROM
+              definitions AS definition
+          LEFT JOIN
+              words AS word ON definition.wordId = word.id
+          LEFT JOIN
+              \`definition-likes-dislikes\` AS liked
+              ON definition.id = liked.definitionId AND liked.userId = ? AND liked.liked = 1
+          LEFT JOIN
+              \`definition-likes-dislikes\` AS disliked
+              ON definition.id = disliked.definitionId AND disliked.userId = ? AND disliked.liked = 0
+          LEFT JOIN
+              \`definition-reports\` AS reported
+              ON definition.id = reported.definitionId AND reported.userId = ?
+          WHERE
+              word.reportCount <= 5 AND definition.reportCount <= 5 AND
+              (word.arabicWord LIKE ? OR word.francoArabicWord LIKE ? OR definition.definition LIKE ?)
+      )
+      SELECT
+          wordId,
+          definition,
+          id as definitionId,
+          likeCount,
+          dislikeCount,
+          likeDislikeDifference,
+          isArabic,
+          countryCode,
+          word,
+          wordReportCount,
+          definitionReportCount,
+          isLiked,
+          isDisliked,
+          isReported
+      FROM
+          RankedDefinitions
+      WHERE
+          RowNum = 1
+      ORDER BY
+          likeDislikeDifference DESC;
+  `,
+      [userId, userId, userId, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`],
+    );
+
+    return ret;
   }
 }
