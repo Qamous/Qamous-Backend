@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Word } from '../../../typeorm/entities/word';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository, UpdateResult } from 'typeorm';
+import { Repository, UpdateResult } from 'typeorm';
 import { CreateWordParams } from '../../../utils/types';
 import { UpdateWordDto } from '../../dtos/update-word.dto';
 import { User } from '../../../typeorm/entities/user';
@@ -132,6 +132,7 @@ export class WordsService {
    * or francoArabicWord
    *
    * @param {string} keyword - the keyword to search for
+   * @param {number} userId - the id of the user making the search
    * @returns {Promise<Word[]>} - an array of Word objects that match the search keyword
    */
   async searchWords(keyword: string, userId: number): Promise<Word[]> {
