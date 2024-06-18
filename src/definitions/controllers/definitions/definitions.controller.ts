@@ -51,6 +51,13 @@ export class DefinitionsController {
     return this.definitionsService.getDefinitionsByUserId(userId);
   }
 
+  @Get('word/:wordId')
+  async getDefinitionsByWordId(
+    @Param('wordId') wordId: number,
+  ): Promise<Definition[]> {
+    return this.definitionsService.getDefinitionsByWordId(wordId);
+  }
+
   @UseGuards(AuthenticatedGuard)
   @Post()
   async createDefinition(
