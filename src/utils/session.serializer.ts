@@ -9,8 +9,8 @@ export class SessionSerializer extends PassportSerializer {
     super();
   }
 
-  serializeUser(user: User, done: (err: Error, user: any) => void) {
-    done(null, { id: user.id });
+  serializeUser(user: User, done: (err: Error, user: User) => void) {
+    done(null, user);
   }
 
   async deserializeUser(

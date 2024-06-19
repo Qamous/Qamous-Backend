@@ -15,7 +15,6 @@ export class User {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
-  @Exclude()
   @Column({ nullable: false })
   firstName: string;
 
