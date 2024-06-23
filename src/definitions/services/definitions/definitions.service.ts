@@ -39,33 +39,33 @@ export class DefinitionsService {
                                             definition.definition,
                                             definition.likeCount,
                                             definition.dislikeCount,
-                                            definition.reportCount                                                                                                       AS definitionReportCount,
-                                            (definition.likeCount - definition.dislikeCount)                                                                             AS likeDislikeDifference,
+                                            definition.reportCount                           AS definitionReportCount,
+                                            (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
                                             definition.isArabic,
                                             definition.countryCode,
-                                            word.id                                                                                                                      AS wordId,
+                                            word.id                                          AS wordId,
                                             CASE
                                                 WHEN definition.isArabic = 1 THEN word.arabicWord
                                                 ELSE word.francoArabicWord
-                                                END                                                                                                                      AS word,
-                                            word.reportCount                                                                                                             AS wordReportCount,
-                                            IFNULL(liked.id IS NOT NULL, 0)                                                                                              AS isLiked,
-                                            IFNULL(disliked.id IS NOT NULL, 0)                                                                                           AS isDisliked,
-                                            IFNULL(reported.id IS NOT NULL, 0)                                                                                           AS isReported,
-                                            ROW_NUMBER() OVER (PARTITION BY word.id, definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS RowNum
+                                                END                                          AS word,
+                                            word.reportCount                                 AS wordReportCount,
+                                            IFNULL(liked.id IS NOT NULL, 0)                  AS isLiked,
+                                            IFNULL(disliked.id IS NOT NULL, 0)               AS isDisliked,
+                                            IFNULL(reported.id IS NOT NULL, 0)               AS isReported,
+                                            ROW_NUMBER() OVER (
+                                                PARTITION BY word.id, definition.isArabic
+                                                ORDER BY (definition.likeCount - definition.dislikeCount) DESC
+                                                )                                            AS RowNum
                                      FROM definitions AS definition
-                                              LEFT JOIN
-                                          words AS word ON definition.wordId = word.id
-                                              LEFT JOIN
-                                          \`definition-likes-dislikes\` AS liked
-                                          ON definition.id = liked.definitionId AND liked.userId = ? AND liked.liked = 1
-                                              LEFT JOIN
-                                          \`definition-likes-dislikes\` AS disliked
-                                          ON definition.id = disliked.definitionId AND disliked.userId = ? AND
-                                             disliked.liked = 0
-                                              LEFT JOIN
-                                          \`definition-reports\` AS reported
-                                          ON definition.id = reported.definitionId AND reported.userId = ?
+                                              LEFT JOIN words AS word ON definition.wordId = word.id
+                                              LEFT JOIN \`definition-likes-dislikes\` AS liked
+                                                        ON definition.id = liked.definitionId AND liked.userId = ? AND
+                                                           liked.liked = 1
+                                              LEFT JOIN \`definition-likes-dislikes\` AS disliked
+                                                        ON definition.id = disliked.definitionId AND
+                                                           disliked.userId = ? AND disliked.liked = 0
+                                              LEFT JOIN \`definition-reports\` AS reported
+                                                        ON definition.id = reported.definitionId AND reported.userId = ?
                                      WHERE word.reportCount <= 5
                                        AND definition.reportCount <= 5)
           SELECT wordId,
