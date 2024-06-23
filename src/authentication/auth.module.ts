@@ -7,9 +7,17 @@ import { User } from '../typeorm/entities/user';
 import { LocalStrategy } from '../utils/local.strategy';
 import { SessionSerializer } from '../utils/session.serializer';
 import { JwtModule } from '@nestjs/jwt';
+import { WordsService } from '../words/services/words/words.service';
+import { DefinitionsService } from '../definitions/services/definitions/definitions.service';
+import { Word } from '../typeorm/entities/word';
+import { Definition } from '../typeorm/entities/definition';
+import { Country } from '../typeorm/entities/country';
 
 @Module({
-  imports: [JwtModule, TypeOrmModule.forFeature([User])],
+  imports: [
+    TypeOrmModule.forFeature([User, Word, Country, Definition]),
+    JwtModule,
+  ],
   controllers: [AuthController],
   providers: [
     {
@@ -17,6 +25,8 @@ import { JwtModule } from '@nestjs/jwt';
       useClass: AuthService,
     },
     UsersService,
+    WordsService,
+    DefinitionsService,
     LocalStrategy,
     SessionSerializer,
   ],

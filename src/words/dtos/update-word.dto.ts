@@ -1,6 +1,7 @@
 export class UpdateWordDto {
   arabicWord: string;
-  FrancoArabicWord: string;
-  CountriesOfUse: string[];
-  createdAt: Date;
+  FrancoArabicWord?: string;
+  CountriesOfUse?: string[];
+  userId?: number;
+  createdAt?: Date;
 }
