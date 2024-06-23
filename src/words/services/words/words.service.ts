@@ -202,4 +202,14 @@ export class WordsService {
 
     return ret;
   }
+
+  /**
+   * This returns words by their user id
+   *
+   * @param {number} userId - the id of the user to return words for
+   * @returns {Promise<Word[]>} - an array of Word objects with the specified user id
+   */
+  async findByUserId(userId: number): Promise<Word[]> {
+    return this.wordsRepository.find({ where: { userId } });
+  }
 }

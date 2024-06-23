@@ -186,4 +186,14 @@ export class DefinitionsService {
 
     return definition.country;
   }
+
+  /**
+   * This method finds definitions by user id
+   *
+   * @param {number} userId - the id of the user to find definitions by
+   * @returns {Promise<Definition[]>} - an array of definitions
+   */
+  async findByUserId(userId: number): Promise<Definition[]> {
+    return this.definitionsRepository.find({ where: { userId } });
+  }
 }

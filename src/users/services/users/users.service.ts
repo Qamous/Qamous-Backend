@@ -11,6 +11,10 @@ import { plainToClass } from 'class-transformer';
 import { randomBytes } from 'crypto';
 import { MailerService } from '@nestjs-modules/mailer';
 import { JwtService } from '@nestjs/jwt';
+import { DefinitionsService } from '../../../definitions/services/definitions/definitions.service';
+import { WordsService } from '../../../words/services/words/words.service';
+import { UpdateWordDto } from '../../../words/dtos/update-word.dto';
+import { Word } from '../../../typeorm/entities/word';
 
 @Injectable()
 export class UsersService {
@@ -18,6 +22,8 @@ export class UsersService {
     @InjectRepository(User) private usersRepository: Repository<User>,
     private readonly mailerService: MailerService,
     private readonly jwtService: JwtService,
+    private readonly wordsService: WordsService,
+    private readonly definitionsService: DefinitionsService,
   ) {}
 
   /**
@@ -75,13 +81,44 @@ export class UsersService {
   }
 
   /**
-   * This deletes a user by their id
+   * This sets all of a user's posted words and definitions to user with id=7,
+   * then deletes the user by their id.
    *
    * @param {number} id - the id of the user to delete
    * @returns {Promise<DeleteResult>} - the delete result
    */
   async deleteUser(id: number): Promise<DeleteResult> {
-    return this.usersRepository.delete({ id });
+    const user: User = await this.usersRepository.findOne({ where: { id } });
+
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    // Set all of the user's posted words and definitions to user with id=7
+    const words = await this.wordsService.findByUserId(id);
+    const definitions = await this.definitionsService.findByUserId(id);
+
+    for (const word of words) {
+      word.userId = 7;
+      const updateWordDto: UpdateWordDto = {
+        FrancoArabicWord: word.francoArabicWord,
+        arabicWord: word.arabicWord,
+        userId: 7,
+      };
+      await this.wordsService.updateWord(user, word.id, updateWordDto);
+    }
+
+    for (const definition of definitions) {
+      definition.userId = 7;
+      await this.definitionsService.updateDefinitionById(
+        user,
+        definition.id,
+        definition,
+      );
+    }
+
+    // Delete the user
+    return await this.usersRepository.delete(id);
   }
 
   /**
