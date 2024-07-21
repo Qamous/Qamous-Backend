@@ -20,7 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@nestjs-modules/mailer": "^1.6.1",
+    "@nestjs-modules/mailer": "^2.0.2",
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/jwt": "^10.2.0",
@@ -34,7 +34,7 @@
     "dotenv": "^16.4.4",
     "express-mysql-session": "^2.1.8",
     "express-session": "^1.18.0",
-    "mysql2": "^3.9.2",
+    "mysql2": "^3.10.3",
     "nodemailer": "^6.9.13",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
