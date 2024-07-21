@@ -5,6 +5,7 @@ import * as cors from 'cors';
 import * as session from 'express-session';
 import * as passport from 'passport';
 import { v4 as uuidV4 } from 'uuid';
+import * as mysql from 'mysql2/promise';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -14,13 +15,15 @@ async function bootstrap(): Promise<void> {
   app.use(cors({ origin: 'http://localhost:3001', credentials: true }));
 
   const mySqlStore = require('express-mysql-session')(session);
+
   // TODO: Should I switch to a TypeORM store (https://www.youtube.com/watch?v=7DEByCGk4rQ&list=PL_cUvD4qzbkw-phjGK2qq0nQiG6gw1cKK&index=22&ab_channel=AnsontheDeveloper)?
-  const APP_PORT = process.env.APP_PORT || 3000;
+  const APP_PORT: string = process.env.APP_PORT || '3000';
   const IN_PROD: boolean = process.env.NODE_ENV === 'production';
   const TEN_MINUTES: number = 1000 * 60 * 10;
 
   const options = {
     connectionLimit: 10,
+    connectTimeout: 10,
     host: process.env.HOST,
     port: parseInt(process.env.PORT), // db port
     user: process.env.USER,
@@ -29,7 +32,8 @@ async function bootstrap(): Promise<void> {
     createDatabaseTable: true,
   };
 
-  const sessionStore = new mySqlStore(options);
+  const pool: mysql.Pool = mysql.createPool(options);
+  const sessionStore = new mySqlStore(options, pool);
 
   // Set up the session middleware
   app.use(
