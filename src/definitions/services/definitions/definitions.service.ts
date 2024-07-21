@@ -6,6 +6,7 @@ import { CreateDefinitionDto } from '../../dtos/create-definition.dto';
 import { UpdateDefinitionDto } from '../../dtos/update-definition.dto';
 import { User } from '../../../typeorm/entities/user';
 import { Country } from '../../../typeorm/entities/country';
+import { countryCodes } from '../../../utils/country-codes';
 
 type MostLikedDefinition = {
   wordId: number;
@@ -129,11 +130,17 @@ export class DefinitionsService {
     }
 
     // Find the country
-    const country: Country = await this.countriesRepository.findOne({
+    let country: Country = await this.countriesRepository.findOne({
       where: { countryName: modifiedCountryName },
     });
     if (!country) {
-      throw new HttpException('Country not found', HttpStatus.NOT_FOUND);
+      const countryCode: string = countryCodes[modifiedCountryName] || 'XX';
+      // XX: Unknown or unspecified country
+      country = this.countriesRepository.create({
+        countryCode: countryCode,
+        countryName: modifiedCountryName,
+      });
+      country = await this.countriesRepository.save(country);
     }
 
     // Assign the countries to the definition
