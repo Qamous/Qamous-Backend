@@ -60,7 +60,7 @@ dotenv.config({ path: './safe/.env' });
         transport: {
           host: 'smtp.gmail.com',
           port: 587,
-          secure: false, // upgrade later with STARTTLS
+          secure: false, // TODO: upgrade later with STARTTLS
           auth: {
             user: process.env.EMAIL_USERNAME,
             pass: process.env.EMAIL_PASSWORD,

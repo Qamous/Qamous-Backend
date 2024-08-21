@@ -59,3 +59,22 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # directories
 /data-scraping/
 /safe/
+
+# package json
+package-lock.json
+
+# docker
+.dockerignore
+.dockerenv
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+docker-compose.debug.yml
+docker-compose.test.yml
+docker-compose.prod.yml
+
+# aws copilot
+copilot/
+
+# db test
+test-db-connection.ts

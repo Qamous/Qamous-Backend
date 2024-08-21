@@ -1,0 +1,44 @@
+services:
+  nestjs_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nestjs_api
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./safe/.env
+    environment:
+      - APP_PORT=3000
+      - HOST=mysql_db
+      - PORT=3306
+      - USER=tempuser
+      - PASSWORD=TonyUD@2024+
+      - DATABASE=qamous-db
+
+      - AWS_USER='qamoose-the-goose'
+      - SESS_NAME='QAMOUS_SESSION_ID'
+      - SESS_SECRET='WsE]0;vhAF-ilo0awP!MV^,^vhvE+.PrL[F0To\'xe5[ip.Cl0OCQ'
+      - SESSION_SECRET='TonySession@2024+'
+      - IN_PROD='dev'
+      - PEPPER='Tony'
+      - EMAIL_USERNAME='QamousAR@gmail.com'
+      - EMAIL_PASSWORD='gvae bfxw yvlr pjls'
+      - JWT_SECRET='!@BU41rfdKWQgz41#q0tRlX8b40a4-_HkRC9SBsdf'
+      - PASS='QamousA%4ShK=FJV;sR7kNE(2p"@'
+    volumes:
+      - ./src:/usr/src/app/src
+
+  mysql_db:
+    image: public.ecr.aws/docker/library/mysql:oraclelinux9
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: TonyUD@2024+
+      MYSQL_DATABASE: qamous-db
+      MYSQL_USER: tempuser
+      MYSQL_PASSWORD: TonyUD@2024+
+
+networks:
+  app-network:
+    driver: bridge
