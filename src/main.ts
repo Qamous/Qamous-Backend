@@ -7,6 +7,8 @@ import * as passport from 'passport';
 import { v4 as uuidV4 } from 'uuid';
 import * as mysql from 'mysql2/promise';
 
+require('mysql2');
+
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   // TODO: update robots.txt and sitemap.xml once we have a domain and we're ready to go live
@@ -23,7 +25,7 @@ async function bootstrap(): Promise<void> {
 
   const options = {
     connectionLimit: 10,
-    connectTimeout: 10,
+    connectTimeout: 10000, // Increased timeout for better stability
     host: process.env.HOST,
     port: parseInt(process.env.PORT), // db port
     user: process.env.USER,
