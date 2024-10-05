@@ -14,6 +14,11 @@ import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
 
 @Controller('auth')
 export class AuthController {
+  @Get('health')
+  check() {
+    return { status: 'OK' };
+  }
+
   /**
    * This is a POST request to /auth/login that logs in a user
    * and returns the user object
