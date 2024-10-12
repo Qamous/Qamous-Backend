@@ -42,6 +42,7 @@ safe/.env
 .env.production.local
 .env.local
 process-env.d.ts
+docker-compose.yml
 
 # temp directory
 .temp
