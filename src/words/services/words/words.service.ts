@@ -29,7 +29,10 @@ export class WordsService {
     });
 
     if (existingWord) {
-      if (existingWord.francoArabicWord === '') {
+      if (
+        existingWord.francoArabicWord === '' ||
+        !existingWord.francoArabicWord
+      ) {
         existingWord.francoArabicWord = wordDetails.francoArabicWord;
         return await this.wordsRepository.save(existingWord);
       }
