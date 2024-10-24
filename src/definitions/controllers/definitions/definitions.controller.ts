@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { DefinitionsService } from '../../services/definitions/definitions.service';
 import { Definition } from '../../../typeorm/entities/definition';
@@ -29,14 +30,17 @@ export class DefinitionsController {
   }
 
   @Get('most-liked')
-  @Throttle({ default: { limit: 15, ttl: 60000 } }) // 15 requests per minute
   async getMostLikedDefinitions(
     @Req() req?: RequestType,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
   ): Promise<Definition[]> {
     let userId: number = req && req.user ? req.user.id : 0;
-    // cast userId to number to prevent SQL injection attacks
+    // cast all the variables to number to prevent SQL injection attacks
     userId = Number(userId);
-    return this.definitionsService.getMostLikedDefinitions(userId);
+    page = Number(page);
+    limit = Number(limit);
+    return this.definitionsService.getMostLikedDefinitions(userId, page, limit);
   }
 
   @Get(':id')

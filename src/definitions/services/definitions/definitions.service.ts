@@ -33,7 +33,12 @@ export class DefinitionsService {
     return this.definitionsRepository.find();
   }
 
-  async getMostLikedDefinitions(userId: number): Promise<Definition[]> {
+  async getMostLikedDefinitions(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<Definition[]> {
+    const offset = (page - 1) * limit;
     const ret = await this.definitionsRepository.query(
       `
           WITH RankedDefinitions AS (SELECT definition.id,
@@ -85,17 +90,22 @@ export class DefinitionsService {
                  isReported
           FROM RankedDefinitions
           WHERE RowNum = 1
-          ORDER BY likeDislikeDifference DESC;
+          ORDER BY (likeDislikeDifference + RAND() * 25) DESC
+          LIMIT ? OFFSET ?;
       `,
-      [userId, userId, userId],
+      [userId, userId, userId, limit, offset],
     );
 
     return ret;
   }
 
-  async getDefinitionById(id: number): Promise<Definition> {
+  async getDefinitionById(
+    id: number,
+    options?: { relations?: string[] },
+  ): Promise<Definition> {
     return this.definitionsRepository.findOne({
       where: { id },
+      relations: options?.relations,
     });
   }
 
