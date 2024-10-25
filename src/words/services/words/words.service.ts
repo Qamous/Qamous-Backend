@@ -123,11 +123,16 @@ export class WordsService {
    */
   // TODO: This definitely needs to be tested
   async getWordsByCountry(countryCode: string): Promise<Word[]> {
-    return this.wordsRepository
-      .createQueryBuilder('word')
-      .innerJoin('word.countriesOfUse', 'country')
-      .where('country.countryCode = :countryCode', { countryCode })
-      .getMany();
+    return await this.wordsRepository.query(
+      `
+          SELECT def.*, word.*, country.*
+          FROM definitions AS def
+                   INNER JOIN countries AS country ON def.countryCode = country.countryCode
+                   LEFT JOIN words AS word ON word.id = def.wordId
+          WHERE country.countryCode = ?;
+      `,
+      [countryCode],
+    );
   }
 
   /**
