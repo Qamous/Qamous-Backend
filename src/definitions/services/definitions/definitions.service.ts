@@ -99,6 +99,56 @@ export class DefinitionsService {
     return ret;
   }
 
+  async getRandomMatchingDefinitions(): Promise<Definition[]> {
+    const ret = await this.definitionsRepository.query(
+      `
+          WITH RandomWord AS (
+              SELECT wordId
+              FROM definitions
+              GROUP BY wordId
+              HAVING COUNT(CASE WHEN isArabic = 1 THEN 1 END) > 0
+                 AND COUNT(CASE WHEN isArabic = 0 THEN 1 END) > 0
+              ORDER BY RAND()
+              LIMIT 1
+          ),
+               TopLikedDefinitions AS (
+                   SELECT definition.id,
+                          definition.definition,
+                          definition.likeCount,
+                          definition.dislikeCount,
+                          definition.reportCount AS definitionReportCount,
+                          definition.isArabic,
+                          definition.countryCode,
+                          word.id AS wordId,
+                          CASE
+                              WHEN definition.isArabic = 1 THEN word.arabicWord
+                              ELSE word.francoArabicWord
+                              END AS word,
+                          word.reportCount AS wordReportCount,
+                          IFNULL(liked.id IS NOT NULL, 0) AS isLiked,
+                          IFNULL(disliked.id IS NOT NULL, 0) AS isDisliked,
+                          IFNULL(reported.id IS NOT NULL, 0) AS isReported,
+                          ROW_NUMBER() OVER (PARTITION BY definition.isArabic ORDER BY (definition.likeCount - definition.dislikeCount) DESC) AS ranking
+                   FROM definitions AS definition
+                            LEFT JOIN words AS word ON definition.wordId = word.id
+                            LEFT JOIN \`definition-likes-dislikes\` AS liked
+                                       ON definition.id = liked.definitionId AND liked.liked = 1
+                            LEFT JOIN \`definition-likes-dislikes\` AS disliked
+                                       ON definition.id = disliked.definitionId AND disliked.liked = 0
+                            LEFT JOIN \`definition-reports\` AS reported
+                                       ON definition.id = reported.definitionId
+                    WHERE definition.wordId = (SELECT wordId FROM RandomWord)
+                   )
+                   SELECT *
+                   FROM TopLikedDefinitions
+                   WHERE ranking = 1
+                   ORDER BY isArabic DESC;
+      `,
+    );
+
+    return ret;
+  }
+
   async getDefinitionById(
     id: number,
     options?: { relations?: string[] },

@@ -43,6 +43,11 @@ export class DefinitionsController {
     return this.definitionsService.getMostLikedDefinitions(userId, page, limit);
   }
 
+  @Get('random-matching')
+  async getRandomMatchingDefinitions(): Promise<Definition[]> {
+    return this.definitionsService.getRandomMatchingDefinitions();
+  }
+
   @Get(':id')
   async getDefinitionById(@Param('id') id: number): Promise<Definition> {
     return this.definitionsService.getDefinitionById(id);
