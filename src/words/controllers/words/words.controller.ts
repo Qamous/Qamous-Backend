@@ -88,7 +88,8 @@ export class WordsController {
   async getWordsByCountry(
     @Param('countryCode') countryCode: string,
   ): Promise<Word[]> {
-    return await this.wordsService.getWordsByCountry(countryCode);
+    const decodedCountryCode = decodeURIComponent(countryCode);
+    return await this.wordsService.getWordsByCountry(decodedCountryCode);
   }
 
   /**
