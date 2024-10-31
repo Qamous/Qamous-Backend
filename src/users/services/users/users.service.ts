@@ -14,7 +14,7 @@ import { JwtService } from '@nestjs/jwt';
 import { DefinitionsService } from '../../../definitions/services/definitions/definitions.service';
 import { WordsService } from '../../../words/services/words/words.service';
 import { UpdateWordDto } from '../../../words/dtos/update-word.dto';
-import { Word } from '../../../typeorm/entities/word';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class UsersService {
@@ -25,6 +25,7 @@ export class UsersService {
     private readonly wordsService: WordsService,
     private readonly definitionsService: DefinitionsService,
   ) {}
+  private readonly logger = new Logger(UsersService.name);
 
   /**
    * This returns all users
@@ -65,6 +66,9 @@ export class UsersService {
     id: number,
     updateUserDetails: UpdateUserParams,
   ): Promise<UpdateResult> {
+    this.logger.log(
+      `Updating user ${id} with details: ${JSON.stringify(updateUserDetails)}`,
+    );
     // updateUserDetails.password = await newPasswordHashing(
     //   updateUserDetails.password,
     // );
@@ -199,6 +203,7 @@ export class UsersService {
   }
 
   async sendPasswordResetEmail(email: string, token: string): Promise<void> {
+    const url = `${process.env.REACT_APP_URL}`;
     await this.mailerService.sendMail({
       to: email, // list of receivers
       from: process.env.EMAIL_USERNAME, // sender address
@@ -206,6 +211,7 @@ export class UsersService {
       template: 'password-reset', // The name of the template file
       context: {
         // Data to be sent to template engine.
+        url,
         token,
         email,
       },
