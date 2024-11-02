@@ -6,6 +6,8 @@ import {
   Param,
   UseGuards,
   Request,
+  HttpStatus,
+  HttpCode,
 } from '@nestjs/common';
 import { DefinitionLikesDislikesService } from '../../services/definition-likes-dislikes/definition-likes-dislikes.service';
 import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
@@ -19,7 +21,7 @@ export class DefinitionLikesDislikesController {
   ) {}
 
   @UseGuards(AuthenticatedGuard)
-  @Throttle({ default: { limit: 7, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/like')
   async likeDefinition(
     @Request() req: RequestType,
@@ -33,7 +35,7 @@ export class DefinitionLikesDislikesController {
   }
 
   @UseGuards(AuthenticatedGuard)
-  @Throttle({ default: { limit: 7, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/dislike')
   async dislikeDefinition(
     @Request() req: RequestType,
@@ -46,7 +48,7 @@ export class DefinitionLikesDislikesController {
   }
 
   @UseGuards(AuthenticatedGuard)
-  @Throttle({ default: { limit: 7, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/unlike')
   async unlikeDefinition(
     @Request() req: RequestType,
@@ -59,7 +61,7 @@ export class DefinitionLikesDislikesController {
   }
 
   @UseGuards(AuthenticatedGuard)
-  @Throttle({ default: { limit: 7, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/undislike')
   async undislikeDefinition(
     @Request() req: RequestType,

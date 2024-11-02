@@ -19,7 +19,6 @@ import { RequestType } from 'express-serve-static-core';
 export class WordReportsController {
   constructor(private wordReportsService: WordReportsService) {}
 
-  @UseGuards(AuthenticatedGuard)
   @Post()
   async createWordReport(
     @Request() req: RequestType,
