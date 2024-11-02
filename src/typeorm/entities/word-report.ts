@@ -21,7 +21,7 @@ export class WordReport {
   @JoinColumn({ name: 'userId' })
   reportingUser: User;
 
-  @Column({ nullable: false })
+  @Column({ nullable: true })
   userId: number;
 
   @ManyToOne(() => Word)

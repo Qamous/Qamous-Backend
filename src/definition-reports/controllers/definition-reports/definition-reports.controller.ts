@@ -21,7 +21,6 @@ import { DefinitionReport } from '../../../typeorm/entities/definition-report';
 export class DefinitionReportsController {
   constructor(private definitionReportsService: DefinitionReportsService) {}
 
-  @UseGuards(AuthenticatedGuard)
   @Post('')
   createReport(
     @Request() req: RequestType,
@@ -30,6 +29,7 @@ export class DefinitionReportsController {
     return this.definitionReportsService.createReport(req.user, reportDetails);
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Patch(':id')
   updateReport(
     @Param('id', ParseIntPipe) id: number,
@@ -38,16 +38,19 @@ export class DefinitionReportsController {
     return this.definitionReportsService.updateReport(id, reportDetails);
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Delete(':id')
   deleteReport(@Param('id', ParseIntPipe) id: number) {
     return this.definitionReportsService.deleteReport(id);
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Get(':id')
   getReportById(@Param('id', ParseIntPipe) id: number) {
     return this.definitionReportsService.getReportById(id);
   }
 
+  @UseGuards(AuthenticatedGuard)
   @Get()
   getAllReports() {
     return this.definitionReportsService.getAllReports();
