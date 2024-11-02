@@ -26,8 +26,8 @@ export class AuthController {
    * @param {e.Request} req - the request object
    * @returns {Promise<Express.User>} - the user object
    */
-  @UseGuards(LocalAuthGuard)
   @Throttle({ default: { limit: 5, ttl: 300000 } }) // 5 requests per 5 minutes
+  @UseGuards(LocalAuthGuard)
   @Post('login')
   async login(@Request() req: ExpressRequest): Promise<Express.User> {
     // Passport automatically attaches user to the request object
@@ -43,8 +43,8 @@ export class AuthController {
    * @param {e.NextFunction} next - the next function
    * @returns {Promise<{message: string}>} - a message
    */
-  @UseGuards(AuthenticatedGuard)
   @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute
+  @UseGuards(AuthenticatedGuard)
   @Post('logout')
   async logout(
     @Request() req: ExpressRequest,
@@ -71,16 +71,17 @@ export class AuthController {
    * @param {e.Request} req - the request object
    * @returns {Promise<{session: session.Session, sessionId: string}>} - the session and the session id
    */
-  @Get('session')
-  @Throttle({ default: { limit: 2, ttl: 60000 } }) // 2 requests per minute
   //@UseGuards(AuthenticatedGuard)
+  @Throttle({ default: { limit: 2, ttl: 60000 } }) // 2 requests per minute
+  @Get('session')
   async getAuthSession(
     @Request() req: ExpressRequest,
-  ): Promise<{ session: Session; sessionId: string }> {
+  ): Promise<{ session: Session; sessionId: string; authenticated: boolean }> {
     const session: Session = req.session;
     return {
       session: session,
       sessionId: session.id,
+      authenticated: req.isAuthenticated(),
     };
   }
 }
