@@ -14,7 +14,15 @@ async function bootstrap(): Promise<void> {
   // TODO: update robots.txt and sitemap.xml once we have a domain and we're ready to go live
   app.use('/robots.txt', serveStatic('utils/robots.txt'));
   app.use('/sitemap.xml', serveStatic('utils/sitemap.xml'));
-  app.use(cors({ origin: 'http://localhost:3001', credentials: true }));
+  app.use(
+    cors({
+      origin: true, // TODO: change this to the domain of the front end ['https://qamous.org', 'https://www.qamous.org']
+      credentials: true,
+      methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['Authorization'],
+    }),
+  );
 
   const mySqlStore = require('express-mysql-session')(session);
 
