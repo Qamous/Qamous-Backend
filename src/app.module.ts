@@ -39,11 +39,11 @@ dotenv.config({ path: './safe/.env' });
     TypeOrmModule.forRoot({
       type: 'mysql',
       connectorPackage: 'mysql2',
-      host: process.env.HOST,
-      port: parseInt(process.env.PORT),
-      username: process.env.USER,
-      password: process.env.PASSWORD,
-      database: process.env.DATABASE,
+      host: 'localhost',
+      port: 3306,
+      username: 'root',
+      password: 'example',
+      database: 'test_1',
       entities: [
         User,
         Country,

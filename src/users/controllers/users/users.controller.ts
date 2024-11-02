@@ -15,10 +15,6 @@ import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
 import { UpdateUserDto } from '../../dtos/update-user.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
-import {
-  newPasswordHashing,
-  verifyPassword,
-} from '../../../../safe/new-password-hashing';
 import { validateFields } from '../../utils/validation';
 import { plainToClass } from 'class-transformer';
 
@@ -43,11 +39,6 @@ export class UsersController {
    * @param {number} id - the id of the user to return
    * @returns {Promise<User>} - the User object with the specified id
    */
-  @Get(':id')
-  async getUserById(@Param('id', ParseIntPipe) id: number): Promise<User> {
-    const user: User = await this.usersService.findUserById(id);
-    return plainToClass(User, user);
-  }
 
   /**
    * This is a POST request to /users that creates a new user
@@ -59,11 +50,11 @@ export class UsersController {
   async createUser(@Body() createUserDto: CreateUserDto): Promise<User> {
     // TODO: on the front end, make sure to protect from sql injection
     // validation
-    this.httpValidateFields(createUserDto);
+    // this.httpValidateFields(createUserDto);
 
     const { passwordConfirmation, ...userDetails } = createUserDto;
-    this.passwordConfirmation(passwordConfirmation, userDetails.password);
-    userDetails.password = await newPasswordHashing(userDetails.password);
+    // this.passwordConfirmation(passwordConfirmation, userDetails.password);
+    userDetails.password = userDetails.password;
     const user: User = await this.usersService.createUser(userDetails);
     return plainToClass(User, user);
   }
@@ -90,7 +81,7 @@ export class UsersController {
     // if the password is being updated, verify the password confirmation
     const { passwordConfirmation, ...newUserDetails } = updateUserDto;
     this.passwordConfirmation(passwordConfirmation, newUserDetails.password);
-    newUserDetails.password = await newPasswordHashing(newUserDetails.password);
+    newUserDetails.password = newUserDetails.password;
     return await this.usersService.updateUser(id, newUserDetails);
   }
 
@@ -151,7 +142,7 @@ export class UsersController {
     if (updateUserDto.oldPassword) {
       const user: User = await this.usersService.findUserById(id);
       // if old password is incorrect, throw an error
-      if (!(await verifyPassword(updateUserDto.oldPassword, user.password))) {
+      if (updateUserDto.oldPassword != user.password) {
         throw new HttpException(
           'Old password is incorrect',
           HttpStatus.BAD_REQUEST,
@@ -204,5 +195,11 @@ export class UsersController {
     @Body('newPassword') newPassword: string,
   ): Promise<void> {
     return this.usersService.updatePassword(token, newPassword);
+  }
+
+  @Get(':id')
+  async getUserById(@Param('id', ParseIntPipe) id: number): Promise<User> {
+    const user: User = await this.usersService.findUserById(id);
+    return plainToClass(User, user);
   }
 }

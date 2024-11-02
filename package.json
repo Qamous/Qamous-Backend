@@ -67,6 +67,7 @@
     "prettier": "^3.0.0",
     "source-map-support": "^0.5.21",
     "supertest": "^6.3.3",
+    "supertest-session": "^5.0.1",
     "ts-jest": "^29.1.0",
     "ts-loader": "^9.4.3",
     "ts-node": "^10.9.1",
@@ -75,20 +76,42 @@
     "typescript-eslint": "^7.0.1"
   },
   "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "displayName": "unit",
+    "forceExit": true,
+    "name": "unit",
+    "projects": [
+      {
+        "displayName": "unit",
+        "moduleFileExtensions": [
+          "js",
+          "json",
+          "ts"
+        ],
+        "rootDir": "src",
+        "testRegex": ".*\\.spec\\.ts$",
+        "transform": {
+          "^.+\\.(t|j)s$": "ts-jest"
+        },
+        "collectCoverageFrom": [
+          "**/*.(t|j)s"
+        ],
+        "coverageDirectory": "../coverage",
+        "testEnvironment": "node"
+      },
+      {
+        "displayName": "e2e",
+        "moduleFileExtensions": [
+          "js",
+          "json",
+          "ts"
+        ],
+        "rootDir": "./test",
+        "testEnvironment": "node",
+        "testRegex": ".e2e-spec.ts$",
+        "transform": {
+          "^.+\\.(t|j)s$": "ts-jest"
+        }
+      }
+    ]
   }
 }

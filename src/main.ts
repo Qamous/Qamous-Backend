@@ -25,12 +25,12 @@ async function bootstrap(): Promise<void> {
 
   const options = {
     connectionLimit: 10,
-    connectTimeout: 10000, // Increased timeout for better stability
-    host: process.env.HOST,
-    port: parseInt(process.env.PORT), // db port
-    user: process.env.USER,
-    password: process.env.PASSWORD,
-    database: process.env.DATABASE,
+    connectTimeout: 1000, // Increased timeout for better stability
+    host: 'localhost',
+    port: 3306, // db port
+    user: 'root',
+    password: 'example',
+    database: 'test_1',
     createDatabaseTable: true,
   };
 
@@ -44,7 +44,7 @@ async function bootstrap(): Promise<void> {
       genid: function () {
         return uuidV4();
       },
-      secret: process.env.SESS_SECRET,
+      secret: '1234',
       resave: false,
       saveUninitialized: false,
       store: sessionStore,
