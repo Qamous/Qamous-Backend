@@ -1,4 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  UnauthorizedException
+} from "@nestjs/common";
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DefinitionLikeDislike } from '../../../typeorm/entities/definition-like-dislike';
@@ -9,153 +15,163 @@ import { UpdateDefinitionDto } from '../../../definitions/dtos/update-definition
 import { UsersService } from '../../../users/services/users/users.service';
 import { UpdateUserDto } from '../../../users/dtos/update-user.dto';
 import { Logger } from '@nestjs/common';
+import { Definition } from "../../../typeorm/entities/definition";
 
 @Injectable()
 export class DefinitionLikesDislikesService {
+  private readonly logger = new Logger(DefinitionLikesDislikesService.name);
+
   constructor(
     @InjectRepository(DefinitionLikeDislike)
     private definitionLikesDislikesRepository: Repository<DefinitionLikeDislike>,
-    private definitionsService: DefinitionsService, // Inject the DefinitionsService
-    private usersService: UsersService, // Inject the UsersService
+    private definitionsService: DefinitionsService,
+
   ) {}
-  private readonly logger = new Logger(DefinitionLikesDislikesService.name);
 
-  async likeDefinition(user: User, definitionId: number) {
-    const createReactionDto: CreateReactionDto = {
-      definitionId: definitionId,
-      userId: user.id,
-      liked: true,
-      createdAt: new Date(),
-    };
-    const like =
-      this.definitionLikesDislikesRepository.create(createReactionDto);
+  private async validateReactionRequest(user: User, definitionId: number) {
+    // Check if user exists and is active
+    if (!user || !user.id) {
+      throw new UnauthorizedException('User must be authenticated');
+    }
 
-    await this.definitionLikesDislikesRepository.save(like);
-    // Increment the likeCount in the definitions table
+    // Get definition with author information
     const definition = await this.definitionsService.getDefinitionById(
       definitionId,
-      { relations: ['user'] },
+      { relations: ['user'] }
     );
 
-    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
-      likeCount: definition.likeCount + 1,
-    });
+    // Check if definition exists
+    if (!definition) {
+      throw new NotFoundException(`Definition ${definitionId} not found`);
+    }
 
-    // Increment the likesReceived for the user who created the definition
-    this.logger.log(
-      `Incrementing likesReceived for user ${definition.user.id}`,
-    );
-    const definitionUser = await this.usersService.findUserById(
-      definition.user.id,
-    );
-    const updateUserDto: UpdateUserDto = {
-      likesReceived: definitionUser.likesReceived + 1,
-    };
-    await this.usersService.updateUser(definitionUser.id, updateUserDto);
+    // Prevent self-reactions
+    if (definition.userId === user.id) {
+      throw new ConflictException('Cannot react to your own definition');
+    }
+
+    return definition;
+  }
+
+  async handleReaction(user: User, definitionId: number, isLike: boolean) {
+    try {
+      return await this.definitionLikesDislikesRepository.manager.transaction(async transactionalEntityManager => {
+        // Validate the reaction request (make sure user exists, definition exists, and user is not reacting to their own definition)
+        await this.validateReactionRequest(user, definitionId);
+
+        // Check for existing reaction
+        const existingReaction: DefinitionLikeDislike = await transactionalEntityManager.findOne(DefinitionLikeDislike, {
+          where: { userId: user.id, definitionId }
+        });
+
+        if (existingReaction) {
+          if (existingReaction.liked === isLike) {
+            throw new ConflictException(
+              `User has already ${isLike ? 'liked' : 'disliked'} this definition`
+            );
+          }
+
+          // Remove existing reaction and update counts using SQL
+          await transactionalEntityManager.remove(existingReaction);
+
+          // Decrement the previous reaction count
+          await transactionalEntityManager
+            .createQueryBuilder()
+            .update(Definition)
+            .set({
+              likeCount: () => existingReaction.liked ? 'likeCount - 1' : 'likeCount',
+              dislikeCount: () => !existingReaction.liked ? 'dislikeCount - 1' : 'dislikeCount'
+            })
+            .where('id = :id', { id: definitionId })
+            .execute();
+        }
+
+        // Create new reaction
+        const newReaction = this.definitionLikesDislikesRepository.create({
+          definitionId,
+          userId: user.id,
+          liked: isLike,
+          createdAt: new Date()
+        });
+
+        await transactionalEntityManager.save(newReaction);
+
+        // Increment the new reaction count using SQL
+        await transactionalEntityManager
+          .createQueryBuilder()
+          .update(Definition)
+          .set({
+            likeCount: () => isLike ? 'likeCount + 1' : 'likeCount',
+            dislikeCount: () => !isLike ? 'dislikeCount + 1' : 'dislikeCount'
+          })
+          .where('id = :id', { id: definitionId })
+          .execute();
+
+        return { success: true };
+      });
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        throw error;
+      }
+      this.logger.error(`Failed to save reaction: ${error.message}`);
+      throw new InternalServerErrorException('Failed to save reaction');
+    }
+  }
+
+  async removeReaction(user: User, definitionId: number, isLike: boolean) {
+    try {
+      return await this.definitionLikesDislikesRepository.manager.transaction(async transactionalEntityManager => {
+        // Find the reaction
+        const existingReaction = await transactionalEntityManager.findOne(DefinitionLikeDislike, {
+          where: { userId: user.id, definitionId, liked: isLike }
+        });
+
+        if (!existingReaction) {
+          throw new NotFoundException(
+            `No ${isLike ? 'like' : 'dislike'} reaction found for this definition`
+          );
+        }
+
+        // Remove the reaction
+        await transactionalEntityManager.remove(existingReaction);
+
+        // Update counts using SQL decrement
+        await transactionalEntityManager
+          .createQueryBuilder()
+          .update(Definition)
+          .set({
+            likeCount: () => isLike ? 'GREATEST(likeCount - 1, 0)' : 'likeCount',
+            dislikeCount: () => !isLike ? 'GREATEST(dislikeCount - 1, 0)' : 'dislikeCount'
+          })
+          .where('id = :id', { id: definitionId })
+          .execute();
+
+        return { success: true };
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to remove reaction: ${error.message}`);
+      throw new InternalServerErrorException('Failed to remove reaction');
+    }
+  }
+
+  // Convenience methods
+  async likeDefinition(user: User, definitionId: number) {
+    return this.handleReaction(user, definitionId, true);
   }
 
   async dislikeDefinition(user: User, definitionId: number) {
-    const createReactionDto: CreateReactionDto = {
-      definitionId: definitionId,
-      userId: user.id,
-      liked: false, // Set liked to false for dislikes
-      createdAt: new Date(),
-    };
-    const dislike =
-      this.definitionLikesDislikesRepository.create(createReactionDto);
-
-    await this.definitionLikesDislikesRepository.save(dislike);
-
-    // Increment the dislikeCount in the definitions table
-    const definition = await this.definitionsService.getDefinitionById(
-      definitionId,
-      { relations: ['user'] },
-    );
-
-    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
-      dislikeCount: definition.dislikeCount + 1,
-    });
-
-    // Decrement the likesReceived for the user who created the definition
-    this.logger.log(
-      `Decrementing likesReceived for user ${definition.user.id}`,
-    );
-    const definitionUser = await this.usersService.findUserById(
-      definition.user.id,
-    );
-    const updateUserDto: UpdateUserDto = {
-      likesReceived: definitionUser.likesReceived - 1,
-    };
-    await this.usersService.updateUser(definitionUser.id, updateUserDto);
+    return this.handleReaction(user, definitionId, false);
   }
 
   async unlikeDefinition(user: User, definitionId: number) {
-    const like = await this.definitionLikesDislikesRepository.findOne({
-      where: { definitionId, userId: user.id, liked: true },
-    });
-
-    if (!like) {
-      throw new Error('Like not found');
-    }
-
-    await this.definitionLikesDislikesRepository.remove(like);
-
-    const definition = await this.definitionsService.getDefinitionById(
-      definitionId,
-      { relations: ['user'] },
-    );
-    if (!definition.user) {
-      throw new Error('User not found for the definition');
-    }
-
-    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
-      likeCount: definition.likeCount - 1,
-    });
-
-
-    // Decrement the likesReceived for the user who created the definition
-    this.logger.log(
-      `Decrementing likesReceived for user ${definition.user.id}`,
-    );
-    const definitionUser = await this.usersService.findUserById(
-      definition.user.id,
-    );
-    const updateUserDto: UpdateUserDto = {
-      likesReceived: definitionUser.likesReceived - 1,
-    };
-    await this.usersService.updateUser(definitionUser.id, updateUserDto);
+    return this.removeReaction(user, definitionId, true);
   }
 
   async undislikeDefinition(user: User, definitionId: number) {
-    const dislike = await this.definitionLikesDislikesRepository.findOne({
-      where: { definitionId, userId: user.id, liked: false },
-    });
-
-    if (!dislike) {
-      throw new Error('Dislike not found');
-    }
-
-    await this.definitionLikesDislikesRepository.remove(dislike);
-
-    const definition = await this.definitionsService.getDefinitionById(
-      definitionId,
-      { relations: ['user'] },
-    );
-
-    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
-      dislikeCount: definition.dislikeCount - 1,
-    });
-    // Increment the likesReceived for the user who created the definition
-    this.logger.log(
-      `Incrementing likesReceived for user ${definition.user.id}`,
-    );
-    const definitionUser = await this.usersService.findUserById(
-      definition.user.id,
-    );
-    const updateUserDto: UpdateUserDto = {
-      likesReceived: definitionUser.likesReceived + 1,
-    };
-    await this.usersService.updateUser(definitionUser.id, updateUserDto);
+    return this.removeReaction(user, definitionId, false);
   }
 
   async getLikesDislikes(definitionId: number) {
