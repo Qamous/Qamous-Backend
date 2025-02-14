@@ -20,7 +20,7 @@ export class Definition {
   id: number;
 
   // The definitions that we generate will have a user ID of 1
-  @ManyToOne(() => Word)
+  @ManyToOne(() => Word, (word) => word.definitions)
   @JoinColumn({ name: 'wordId' })
   word: Word;
 
