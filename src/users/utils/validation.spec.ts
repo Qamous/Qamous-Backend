@@ -19,17 +19,17 @@ describe('Validation', () => {
       expect(() => validateFields(userDto)).toThrow('First name is required');
     });
     it('should throw an error if last name is empty in UpdateUserDto', () => {
-      const userDto: UpdateUserDto = new UpdateUserDto(
-        'John',
-        '',
-        'john.doe@example.com',
-        'johndoe',
-        'OldP@ssw0rd',
-        'SecureP@ssw0rd',
-        'SecureP@ssw0rd',
-        new Date('2000-01-01'),
-        new Date(),
-      );
+      const userDto: UpdateUserDto = {
+        firstName: 'John',
+        lastName: '',
+        email: 'john.doe@example.com',
+        username: 'johndoe',
+        oldPassword: 'OldP@ssw0rd',
+        password: 'SecureP@ssw0rd',
+        passwordConfirmation: 'SecureP@ssw0rd',
+        dateOfBirth: new Date('2000-01-01'),
+        createdAt: new Date(),
+      };
       expect(() => validateFields(userDto)).not.toThrow();
     });
     it('should throw an error if first name is too long', () => {
