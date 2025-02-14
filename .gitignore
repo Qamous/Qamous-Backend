@@ -43,6 +43,7 @@ safe/.env
 .env.local
 process-env.d.ts
 docker-compose.yml
+src/firebaseConfig.js
 
 # temp directory
 .temp
