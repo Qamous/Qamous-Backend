@@ -34,23 +34,16 @@ export class DefinitionLikesDislikesController {
     @Request() req: UserRequest,
     @Param('definitionID') definitionID: number,
   ) {
-    this.logger.debug(`Starting likeDefinition for user ${req.user.id} and definition ${definitionID}`);
-
     try {
       // First check if the definition exists
       const definition = await this.definitionsService.getDefinitionById(
         definitionID,
         { relations: ['user'] },
       );
-
-      this.logger.debug(`Definition found: ${!!definition}`);
-
-      this.logger.debug(`Processing like request for definition ${definitionID}`);
       const result = await this.definitionLikesDislikesService.likeDefinition(
         req.user,
         definitionID,
       );
-      this.logger.debug('Like request processed successfully');
       return result;
     } catch (error) {
       this.logger.error(`Detailed error in likeDefinition: ${error.stack}`);
