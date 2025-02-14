@@ -36,16 +36,11 @@ export class DefinitionLikesDislikesService {
       definitionId,
       { relations: ['user'] },
     );
-    const updateDefinitionDto: UpdateDefinitionDto = {
-      id: definition.id, // Change definitionId to id
-      AddedTimestamp: definition.AddedTimestamp,
+
+    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
       likeCount: definition.likeCount + 1,
-    };
-    await this.definitionsService.updateDefinitionById(
-      user,
-      definitionId,
-      updateDefinitionDto,
-    );
+    });
+
     // Increment the likesReceived for the user who created the definition
     this.logger.log(
       `Incrementing likesReceived for user ${definition.user.id}`,
@@ -76,16 +71,11 @@ export class DefinitionLikesDislikesService {
       definitionId,
       { relations: ['user'] },
     );
-    const updateDefinitionDto: UpdateDefinitionDto = {
-      id: definition.id,
-      AddedTimestamp: definition.AddedTimestamp,
+
+    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
       dislikeCount: definition.dislikeCount + 1,
-    };
-    await this.definitionsService.updateDefinitionById(
-      user,
-      definitionId,
-      updateDefinitionDto,
-    );
+    });
+
     // Decrement the likesReceived for the user who created the definition
     this.logger.log(
       `Decrementing likesReceived for user ${definition.user.id}`,
@@ -118,16 +108,10 @@ export class DefinitionLikesDislikesService {
       throw new Error('User not found for the definition');
     }
 
-    const updateDefinitionDto: UpdateDefinitionDto = {
-      id: definition.id,
-      AddedTimestamp: definition.AddedTimestamp,
+    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
       likeCount: definition.likeCount - 1,
-    };
-    await this.definitionsService.updateDefinitionById(
-      user,
-      definitionId,
-      updateDefinitionDto,
-    );
+    });
+
 
     // Decrement the likesReceived for the user who created the definition
     this.logger.log(
@@ -157,16 +141,10 @@ export class DefinitionLikesDislikesService {
       definitionId,
       { relations: ['user'] },
     );
-    const updateDefinitionDto: UpdateDefinitionDto = {
-      id: definition.id,
-      AddedTimestamp: definition.AddedTimestamp,
+
+    await this.definitionsService.updateDefinitionReactionCounts(definitionId, {
       dislikeCount: definition.dislikeCount - 1,
-    };
-    await this.definitionsService.updateDefinitionById(
-      user,
-      definitionId,
-      updateDefinitionDto,
-    );
+    });
     // Increment the likesReceived for the user who created the definition
     this.logger.log(
       `Incrementing likesReceived for user ${definition.user.id}`,
