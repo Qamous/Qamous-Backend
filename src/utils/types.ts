@@ -18,6 +18,7 @@ export type UpdateUserParams = {
   password?: string;
   dateOfBirth?: Date;
   createdAt?: Date;
+  likesReceived?: number;
 };
 
 export type CreateCountryParams = {

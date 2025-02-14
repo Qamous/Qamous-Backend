@@ -6,7 +6,6 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
 
 @Injectable()
 export class LocalAuthGuard extends AuthGuard('local') {
@@ -27,13 +26,9 @@ export class AuthenticatedGuard implements CanActivate {
     const isAuthenticated = request.isAuthenticated();
     const user = request.user;
     if (!isAuthenticated || !user) {
-      this.logger.warn(`User object is missing in the request`);
+      this.logger.warn(`Authentication failed - isAuthenticated: ${isAuthenticated}, user present: ${!!user}`);
       throw new UnauthorizedException('User not authenticated properly');
     }
-    this.logger.log(`User authenticated: ${isAuthenticated}`);
-    this.logger.log(`Request headers: ${JSON.stringify(request.headers)}`);
-    this.logger.log(`Request user: ${JSON.stringify(request.user)}`);
-    this.logger.log(`Session: ${JSON.stringify(request.session)}`);
     return isAuthenticated;
   }
 }
