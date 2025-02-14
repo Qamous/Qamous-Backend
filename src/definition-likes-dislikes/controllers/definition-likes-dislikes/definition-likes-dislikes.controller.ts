@@ -6,39 +6,63 @@ import {
   Param,
   UseGuards,
   Request,
-  HttpStatus,
-  HttpCode,
-} from '@nestjs/common';
+  Logger
+} from "@nestjs/common";
 import { DefinitionLikesDislikesService } from '../../services/definition-likes-dislikes/definition-likes-dislikes.service';
 import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
 import { RequestType } from 'express-serve-static-core';
 import { Throttle } from '@nestjs/throttler';
+import { User } from "../../../typeorm/entities/user";
+import { DefinitionsService } from "../../../definitions/services/definitions/definitions.service";
+
+interface UserRequest extends Request {
+  user?: User;
+}
 
 @Controller('reactions')
 export class DefinitionLikesDislikesController {
+  private readonly logger = new Logger(DefinitionLikesDislikesController.name);
   constructor(
     private readonly definitionLikesDislikesService: DefinitionLikesDislikesService,
+    private readonly definitionsService: DefinitionsService,
   ) {}
 
   @UseGuards(AuthenticatedGuard)
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
+  //@Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/like')
   async likeDefinition(
-    @Request() req: RequestType,
+    @Request() req: UserRequest,
     @Param('definitionID') definitionID: number,
   ) {
-    console.log(definitionID);
-    return await this.definitionLikesDislikesService.likeDefinition(
-      req.user,
-      definitionID,
-    );
+    this.logger.debug(`Starting likeDefinition for user ${req.user.id} and definition ${definitionID}`);
+
+    try {
+      // First check if the definition exists
+      const definition = await this.definitionsService.getDefinitionById(
+        definitionID,
+        { relations: ['user'] },
+      );
+
+      this.logger.debug(`Definition found: ${!!definition}`);
+
+      this.logger.debug(`Processing like request for definition ${definitionID}`);
+      const result = await this.definitionLikesDislikesService.likeDefinition(
+        req.user,
+        definitionID,
+      );
+      this.logger.debug('Like request processed successfully');
+      return result;
+    } catch (error) {
+      this.logger.error(`Detailed error in likeDefinition: ${error.stack}`);
+      throw error;
+    }
   }
 
   @UseGuards(AuthenticatedGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/dislike')
   async dislikeDefinition(
-    @Request() req: RequestType,
+    @Request() req: UserRequest,
     @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.dislikeDefinition(
@@ -51,7 +75,7 @@ export class DefinitionLikesDislikesController {
   @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/unlike')
   async unlikeDefinition(
-    @Request() req: RequestType,
+    @Request() req: UserRequest,
     @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.unlikeDefinition(
@@ -64,7 +88,7 @@ export class DefinitionLikesDislikesController {
   @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   @Post(':definitionID/undislike')
   async undislikeDefinition(
-    @Request() req: RequestType,
+    @Request() req: UserRequest,
     @Param('definitionID') definitionID: number,
   ) {
     return await this.definitionLikesDislikesService.undislikeDefinition(
