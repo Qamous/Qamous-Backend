@@ -209,6 +209,28 @@ export class DefinitionsService {
     return this.definitionsRepository.save(newDefinition);
   }
 
+  async updateDefinitionReactionCounts(
+    definitionId: number,
+    updateDefinitionDto: Partial<Pick<UpdateDefinitionDto, 'likeCount' | 'dislikeCount'>>,
+  ) {
+    // Only allow updating the reaction counts
+    const allowedUpdate = {
+      ...(updateDefinitionDto.likeCount !== undefined && { likeCount: updateDefinitionDto.likeCount }),
+      ...(updateDefinitionDto.dislikeCount !== undefined && { dislikeCount: updateDefinitionDto.dislikeCount }),
+    };
+
+    const result = await this.definitionsRepository.update(
+      { id: definitionId },
+      allowedUpdate,
+    );
+
+    if (result.affected === 0) {
+      throw new HttpException('Definition not found', HttpStatus.NOT_FOUND);
+    }
+
+    return result;
+  }
+
   async updateDefinitionById(
     user: User,
     id: number,
