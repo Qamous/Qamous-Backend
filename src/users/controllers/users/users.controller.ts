@@ -205,4 +205,16 @@ export class UsersController {
   ): Promise<void> {
     return this.usersService.updatePassword(token, newPassword);
   }
+
+  /**
+   * This is a POST request to /users/recalculate-points that recalculates all users' points
+   *
+   * @returns {Promise<{ message: string }>} - a message indicating that the points were recalculated successfully
+   */
+  @UseGuards(AuthenticatedGuard)
+  @Post('recalculate-points')
+  async recalculatePoints(): Promise<{ message: string }> { // TODO: Add appropriate guards
+    await this.usersService.recalculateAllUsersPoints();
+    return { message: 'Points recalculated successfully' };
+  }
 }
