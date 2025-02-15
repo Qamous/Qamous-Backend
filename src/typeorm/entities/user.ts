@@ -45,6 +45,9 @@ export class User {
   @Column({ default: 0 })
   likesReceived: number;
 
+  @Column({ default: 0 })
+  points: number;
+
   @Column()
   createdAt: Date;
 
