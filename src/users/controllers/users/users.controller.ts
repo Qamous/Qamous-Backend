@@ -8,8 +8,8 @@ import {
   Param,
   ParseIntPipe,
   Patch,
-  Post,
-} from '@nestjs/common';
+  Post, Req, UseGuards
+} from "@nestjs/common";
 import { CreateUserDto } from '../../dtos/create-user.dto';
 import { UsersService } from '../../services/users/users.service';
 import { User } from '../../../typeorm/entities/user';
@@ -21,6 +21,9 @@ import {
 } from '../../../../safe/new-password-hashing';
 import { validateFields } from '../../utils/validation';
 import { plainToClass } from 'class-transformer';
+import { AuthenticatedGuard } from "../../../utils/local.guard";
+import { UserRequest } from "../../../utils/types";
+import { Throttle } from "@nestjs/throttler";
 
 @Controller('users')
 export class UsersController {
@@ -212,9 +215,34 @@ export class UsersController {
    * @returns {Promise<{ message: string }>} - a message indicating that the points were recalculated successfully
    */
   @UseGuards(AuthenticatedGuard)
+  // TODO: @Throttle({ default: { limit: 2, ttl: 60000 } })
   @Post('recalculate-points')
   async recalculatePoints(): Promise<{ message: string }> { // TODO: Add appropriate guards
     await this.usersService.recalculateAllUsersPoints();
     return { message: 'Points recalculated successfully' };
   }
+
+  /**
+   * This is a GET request to /users/me/points that returns the points of the authenticated user
+   * @param req - the request object
+   * @returns {Promise<{ points: number }>} - an object containing the points of the authenticated user
+   */
+  @UseGuards(AuthenticatedGuard)
+  @Get('me/points')
+  async getUserPoints(@Req() req: UserRequest): Promise<{ points: number }> {
+    const user = await this.usersService.findUserById(req.user.id);
+    return { points: user.points };
+  }
+
+  /**
+   * This is a GET request to /users/:id/points that returns the points of a user by their id
+   * @param id - the id of the user to return the points for
+   * @returns {Promise<{ points: number }>} - an object containing the points of the user
+   */
+  @Get(':id/points')
+  async getPointsById(@Param('id', ParseIntPipe) id: number): Promise<{ points: number }> {
+    const user = await this.usersService.findUserById(id);
+    return { points: user.points };
+  }
+
 }
