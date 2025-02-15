@@ -34,21 +34,10 @@ export class DefinitionLikesDislikesController {
     @Request() req: UserRequest,
     @Param('definitionID') definitionID: number,
   ) {
-    try {
-      // First check if the definition exists
-      const definition = await this.definitionsService.getDefinitionById(
-        definitionID,
-        { relations: ['user'] },
-      );
-      const result = await this.definitionLikesDislikesService.likeDefinition(
-        req.user,
-        definitionID,
-      );
-      return result;
-    } catch (error) {
-      this.logger.error(`Detailed error in likeDefinition: ${error.stack}`);
-      throw error;
-    }
+    return await this.definitionLikesDislikesService.likeDefinition(
+      req.user,
+      definitionID,
+    );
   }
 
   @UseGuards(AuthenticatedGuard)
@@ -129,5 +118,27 @@ export class DefinitionLikesDislikesController {
       req.user,
       definitionID,
     );
+  }
+
+  @UseGuards(AuthenticatedGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post(':definitionID/switch-reaction')
+  async switchReaction(
+    @Request() req: UserRequest,
+    @Param('definitionID') definitionID: number,
+    @Body() body: { toReaction: 'like' | 'dislike' }
+  ) {
+    return await this.definitionLikesDislikesService.switchReaction(
+      req.user,
+      definitionID,
+      body.toReaction
+    );
+  }
+
+  @Post('recalculate-all')
+  @UseGuards(AuthenticatedGuard)
+  @Throttle({ default: { limit: 1, ttl: 60000 } })
+  async recalculateAllDefinitionReactions() {
+    return await this.definitionLikesDislikesService.recalculateAllDefinitionReactions();
   }
 }
