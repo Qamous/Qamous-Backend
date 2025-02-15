@@ -217,4 +217,34 @@ export class UsersService {
       },
     });
   }
+
+  async updateUserPoints(userId: number, pointChange: number): Promise<void> {
+    await this.usersRepository.increment({ id: userId }, 'points', pointChange);
+  }
+
+  async recalculateAllUsersPoints(): Promise<void> {
+    // Get all users
+    const users = await this.usersRepository.find({
+      relations: ['definitions'],
+    });
+
+    for (const user of users) {
+      let points = 0;
+
+      // Points from likes received
+      points += user.likesReceived;
+
+      // Points from definitions
+      if (user.definitions) {
+        points += user.definitions.length; // +1 for each definition
+      }
+
+      if (user.words) {
+        points += user.words.length; // +1 for each word
+      }
+
+      // Update user points
+      await this.usersRepository.update(user.id, { points });
+    }
+  }
 }

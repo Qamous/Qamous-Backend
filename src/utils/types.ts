@@ -1,4 +1,5 @@
 import { User } from '../typeorm/entities/user';
+import { Request } from "@nestjs/common";
 
 export type CreateUserParams = {
   firstName: string;
@@ -47,4 +48,8 @@ declare module 'express-serve-static-core' {
   interface RequestType extends Request {
     user?: User;
   }
+}
+
+export interface UserRequest extends Request {
+  user?: User;
 }
