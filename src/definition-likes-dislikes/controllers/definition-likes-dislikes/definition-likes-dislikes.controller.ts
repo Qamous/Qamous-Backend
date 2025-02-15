@@ -6,25 +6,19 @@ import {
   Param,
   UseGuards,
   Request,
-  Logger
+  Logger, Body
 } from "@nestjs/common";
 import { DefinitionLikesDislikesService } from '../../services/definition-likes-dislikes/definition-likes-dislikes.service';
 import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
 import { RequestType } from 'express-serve-static-core';
 import { Throttle } from '@nestjs/throttler';
-import { User } from "../../../typeorm/entities/user";
-import { DefinitionsService } from "../../../definitions/services/definitions/definitions.service";
-
-interface UserRequest extends Request {
-  user?: User;
-}
+import { UserRequest } from '../../../utils/types';
 
 @Controller('reactions')
 export class DefinitionLikesDislikesController {
   private readonly logger = new Logger(DefinitionLikesDislikesController.name);
   constructor(
     private readonly definitionLikesDislikesService: DefinitionLikesDislikesService,
-    private readonly definitionsService: DefinitionsService,
   ) {}
 
   @UseGuards(AuthenticatedGuard)
