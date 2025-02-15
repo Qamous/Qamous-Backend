@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { forwardRef, HttpException, HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { InjectRepository } from '@nestjs/typeorm';
 import { Definition } from '../../../typeorm/entities/definition';
 import { Repository, DeleteResult, UpdateResult } from 'typeorm';
@@ -7,6 +7,7 @@ import { UpdateDefinitionDto } from '../../dtos/update-definition.dto';
 import { User } from '../../../typeorm/entities/user';
 import { Country } from '../../../typeorm/entities/country';
 import { countryCodes } from '../../../utils/country-codes';
+import { UsersService } from "../../../users/services/users/users.service";
 
 type MostLikedDefinition = {
   wordId: number;
@@ -27,6 +28,8 @@ export class DefinitionsService {
     private definitionsRepository: Repository<Definition>,
     @InjectRepository(Country)
     private countriesRepository: Repository<Country>,
+    @Inject(forwardRef(() => UsersService))
+    private usersService: UsersService,
   ) {}
 
   async getDefinitions(): Promise<Definition[]> {
@@ -206,7 +209,18 @@ export class DefinitionsService {
     // Assign the countries to the definition
     newDefinition.country = country;
 
-    return this.definitionsRepository.save(newDefinition);
+    const result = this.definitionsRepository.save(newDefinition);
+
+    // Award point for creating a definition
+    await this.usersService.updateUserPoints(user.id, 1);
+
+    // If this is a new word (first definition), award extra point
+    const isNewWord = await this.isFirstDefinitionForWord(newDefinition.wordId);
+    if (isNewWord) {
+      await this.usersService.updateUserPoints(user.id, 1);
+    }
+
+    return result;
   }
 
   async updateDefinitionReactionCounts(
@@ -284,5 +298,18 @@ export class DefinitionsService {
    */
   async findByUserId(userId: number): Promise<Definition[]> {
     return this.definitionsRepository.find({ where: { userId } });
+  }
+
+  /**
+   * This method checks if a definition is the first definition for a word
+   *
+   * @param {number} wordId - the id of the word to check
+   * @returns {Promise<boolean>} - true if the definition is the first definition for the word, false otherwise
+   */
+  private async isFirstDefinitionForWord(wordId: number): Promise<boolean> {
+    const count = await this.definitionsRepository.count({
+      where: { wordId }
+    });
+    return count === 0;
   }
 }
