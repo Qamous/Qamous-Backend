@@ -135,4 +135,9 @@ export class DefinitionLikesDislikesController {
   async recalculateAllDefinitionReactions() {
     return await this.definitionLikesDislikesService.recalculateAllDefinitionReactions();
   }
+
+  // @Delete('all')
+  // async removeAllLikesDislikes() {
+  //   return await this.definitionLikesDislikesService.removeAllReactions();
+  // }
 }
