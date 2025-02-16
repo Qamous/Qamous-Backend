@@ -82,14 +82,17 @@ export class WordsController {
    * This is a GET request to /word/search/iso=:countryCode that returns words by their country of use
    *
    * @param {string} countryCode - the country code of the words to return
-   * @returns {Promise<Word[]>} - an array of Word objects used in the specified country
+   * @param req - the request object
+   * @returns an array of objects used in the specified country
    */
   @Get('search/iso=:countryCode')
   async getWordsByCountry(
     @Param('countryCode') countryCode: string,
-  ): Promise<Word[]> {
+    @Request() req?: RequestType,
+  ) {
     const decodedCountryCode = decodeURIComponent(countryCode);
-    return await this.wordsService.getWordsByCountry(decodedCountryCode);
+    const userId = req?.user?.id || 0;
+    return await this.wordsService.getWordsByCountry(decodedCountryCode, userId);
   }
 
   /**

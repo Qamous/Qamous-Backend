@@ -119,20 +119,53 @@ export class WordsService {
    * This returns words by their country of use
    *
    * @param {string} countryCode - the country code of the words to return
-   * @returns {Promise<Word[]>} - an array of Word objects used in the specified country
+   * @param {number} userId - the id of the user making the request
+   * @returns an array of objects used in the specified country
    */
   // TODO: This definitely needs to be tested
-  async getWordsByCountry(countryCode: string): Promise<Word[]> {
-    return await this.wordsRepository.query(
-      `
-          SELECT def.*, word.*, country.*
-          FROM definitions AS def
-                   INNER JOIN countries AS country ON def.countryCode = country.countryCode
-                   LEFT JOIN words AS word ON word.id = def.wordId
-          WHERE country.countryCode = ?;
-      `,
-      [countryCode],
-    );
+  async getWordsByCountry(countryCode: string, userId: number) {
+    const result = await this.wordsRepository.createQueryBuilder('word')
+      .innerJoin('word.definitions', 'definition')
+      .leftJoin('definition-likes-dislikes', 'likes',
+        'likes.definitionId = definition.id AND likes.userId = :userId AND likes.liked = 1',
+        { userId })
+      .leftJoin('definition-likes-dislikes', 'dislikes',
+        'dislikes.definitionId = definition.id AND likes.userId = :userId AND likes.liked = 0',
+        { userId })
+      .leftJoin('word-reports', 'wordReports',
+        'wordReports.wordId = word.id AND wordReports.userId = :userId',
+        { userId })
+      .leftJoin('definition-reports', 'definitionReports',
+        'definitionReports.definitionId = definition.id AND definitionReports.userId = :userId',
+        { userId })
+      .select([
+        'word.arabicWord as arabicWord',
+        'word.francoArabicWord as francoArabicWord',
+        'word.id as wordId',
+        'definition.id as definitionId',
+        'definition.definition as definition',
+        'definition.isArabic as isArabic',
+        'definition.countryCode as countryCode',
+        'CASE WHEN likes.id IS NOT NULL THEN true ELSE false END as isLiked',
+        'CASE WHEN dislikes.id IS NOT NULL THEN true ELSE false END as isDisliked',
+        'CASE WHEN wordReports.id IS NOT NULL OR definitionReports.id IS NOT NULL THEN true ELSE false END as isReported'
+      ])
+      .where('definition.countryCode = :countryCode', { countryCode })
+      .getRawMany();
+
+    return result.map(item => ({
+      word: item.arabicWord,
+      definition: item.definition,
+      wordId: item.wordId,
+      definitionId: item.definitionId,
+      isArabic: item.isArabic ? 1 : 0,
+      isLiked: item.isLiked === 1,
+      isDisliked: item.isDisliked === 1,
+      isReported: item.isReported === 1,
+      arabicWord: item.arabicWord,
+      francoArabicWord: item.francoArabicWord,
+      countryCode: item.countryCode
+    }));
   }
 
   /**
