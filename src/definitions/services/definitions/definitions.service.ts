@@ -52,6 +52,7 @@ export class DefinitionsService {
                                             (definition.likeCount - definition.dislikeCount) AS likeDislikeDifference,
                                             definition.isArabic,
                                             definition.countryCode,
+                                            definition.example,
                                             word.id                                          AS wordId,
                                             CASE
                                                 WHEN definition.isArabic = 1 THEN word.arabicWord
@@ -90,7 +91,8 @@ export class DefinitionsService {
                  definitionReportCount,
                  isLiked,
                  isDisliked,
-                 isReported
+                 isReported,
+                 example
           FROM RankedDefinitions
           WHERE RowNum = 1
           ORDER BY (likeDislikeDifference + RAND() * 25) DESC
