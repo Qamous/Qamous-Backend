@@ -17,7 +17,7 @@ export class DefinitionLikeDislike {
   @JoinColumn({ name: 'definitionId' })
   definition: Definition;
 
-  @ManyToOne(() => User, (user) => user.definitions)
+  @ManyToOne(() => User, (user) => user.definitions)  // TODO: check if this is correct
   @JoinColumn({ name: 'userId' })
   user: User;
 

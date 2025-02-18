@@ -25,6 +25,9 @@ import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handleba
 import { DefinitionReportsController } from './definition-reports/controllers/definition-reports/definition-reports.controller';
 import { DefinitionReportsModule } from './definition-reports/definition-reports.module';
 import { DefinitionReport } from './typeorm/entities/definition-report';
+import { RagModule } from './rag/rag.module';
+import { ModelService } from './rag/services/model/model.service';
+import { VectorStoreService } from './rag/services/vector-store/vector-store.service';
 
 dotenv.config({ path: './safe/.env' });
 
@@ -87,8 +90,9 @@ dotenv.config({ path: './safe/.env' });
     WordReportsModule,
     AuthModule,
     DefinitionReportsModule,
+    RagModule,
   ],
   controllers: [AppController, AuthController, DefinitionReportsController],
-  providers: [AppService],
+  providers: [AppService, ModelService],
 })
 export class AppModule {}
