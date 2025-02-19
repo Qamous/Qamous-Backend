@@ -11,6 +11,7 @@ import { ModelService } from "../model/model.service";
 interface CitedWord {
   id: number;
   arabicWord: string;
+  francoArabicWord?: string;
   definition: string;
   example?: string;
 }
@@ -28,19 +29,19 @@ export class RagService {
 
   async processQuery(request: RagRequest): Promise<RagResponse> {
     // 1. Extract words from the query
-    const words = this.extractWords(request.query);
+    const words: string[] = this.extractWords(request.query);
 
     // 2. Look up known words and their definitions
-    const knownWords = await this.findKnownWords(words);
+    const knownWords: Word[] = await this.findKnownWords(words);
 
     // 3. Create a map of known words for easy lookup
-    const wordMap = new Map(knownWords.map(word => [word.arabicWord, word]));
+    const wordMap: Map<string, Word> = new Map(knownWords.map(word => [word.arabicWord, word]));
 
     // 4. Retrieve the context vector for the query
-    const vectorContext = await this.vectorStore.retrieveContext(request.query);
+    const vectorContext: string = await this.vectorStore.retrieveContext(request.query);
 
     // 5. Build an augmented context for the model
-    const augmentedContext = this.buildAugmentedContext(
+    const augmentedContext: string = this.buildAugmentedContext(
       request.query,
       knownWords,
       vectorContext
@@ -53,10 +54,10 @@ export class RagService {
     });
 
     // Extract actually used words from the response and create citations
-    const citedWords = this.extractUsedWords(response, wordMap);
+    const citedWords: CitedWord[] = this.extractUsedWords(response, wordMap);
 
     return {
-      response: this.formatMarkdownResponse(response, citedWords),
+      response: this.formatMarkdownResponse(response, citedWords, request.preferredLanguage || 'arabic'),
       sources: citedWords.map(word => `www.qamous.org/word/${word.id}`),
       definitions: citedWords.map(word => ({
         word: word.arabicWord,
@@ -71,16 +72,17 @@ export class RagService {
     const usedWords = new Set<string>();
 
     // Get all Arabic words from the response
-    const arabicWordRegex = /[\u0600-\u06FF]+/g;
-    const words = response.match(arabicWordRegex) || [];
+    const arabicWordRegex: RegExp = /[\u0600-\u06FF]+/g;
+    const words: RegExpMatchArray | [] = response.match(arabicWordRegex) || [];
 
     words.forEach(word => {
       if (!usedWords.has(word) && wordMap.has(word)) {
-        const dbWord = wordMap.get(word);
+        const dbWord: Word = wordMap.get(word);
         usedWords.add(word);
         citedWords.push({
           id: dbWord.id,
           arabicWord: dbWord.arabicWord,
+          francoArabicWord: dbWord.francoArabicWord || undefined,
           definition: dbWord.definitions[0]?.definition || '',
           example: dbWord.definitions[0]?.example
         });
@@ -90,23 +92,27 @@ export class RagService {
     return citedWords;
   }
 
-  private formatMarkdownResponse(response: string, citedWords: CitedWord[]): string {
-    let formattedResponse = response;
-
-    // Replace words with their linked versions
-    citedWords.forEach(word => {
-      const wordRegex = new RegExp(`(?<![\\u0600-\\u06FF])${word.arabicWord}(?![\\u0600-\\u06FF])`, 'g');
-    });
-
-    // Add references section if there are cited words
+  private formatMarkdownResponse(response: string, citedWords: CitedWord[], preferredLanguage: 'arabic' | 'franco-arabic'): string {
+    let formattedResponse: string = response;
     if (citedWords.length > 0) {
-      formattedResponse += '\n\n### المراجع والتعريفات\n';
-      citedWords.forEach(word => {
-        formattedResponse += `- **[${word.arabicWord}](www.qamous.org/word/${word.id})**: ${word.definition}\n`;
-        if (word.example) {
-          formattedResponse += `  مثال: ${word.example}\n`;
-        }
-      });
+      if (preferredLanguage === 'arabic') {
+        formattedResponse += '\n\n### المراجع والتعريفات\n';
+        citedWords.forEach(word => {
+          formattedResponse += `- **[${word.arabicWord}](www.qamous.org/word/${word.id})**: ${word.definition}\n`;
+          if (word.example) {
+            formattedResponse += `  مثال: ${word.example}\n`;
+          }
+        });
+      } else { // franco-arabic
+        formattedResponse += '\n\n### References and Definitions\n';
+        citedWords.forEach(word => {
+          // Include both Arabic and Franco-Arabic versions
+          formattedResponse += `- **[${word.arabicWord}](www.qamous.org/word/${word.id})** (${word.francoArabicWord}): ${word.definition}\n`;
+          if (word.example) {
+            formattedResponse += `  Example: ${word.example}\n`;
+          }
+        });
+      }
     }
 
     return formattedResponse;
@@ -132,7 +138,7 @@ ${vectorContext}
 
 Instructions:
 1. Provide a response in markdown format
-2. Only use words from our dictionary when they are relevant
+2. Use words from our dictionary when they are relevant
 3. Do not make up or include citations for words not in our dictionary
 4. Use Arabic language
 5. Focus on accuracy and cultural relevance
