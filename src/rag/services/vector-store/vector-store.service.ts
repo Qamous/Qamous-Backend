@@ -10,7 +10,7 @@ import { Definition } from '../../../typeorm/entities/definition';
 @Injectable()
 export class VectorStoreService implements OnModuleInit {
   private vectorStore: MemoryVectorStore;
-  private embeddings: GoogleGenerativeAIEmbeddings;
+  private readonly embeddings: GoogleGenerativeAIEmbeddings;
 
   constructor(
     @InjectRepository(Word)
@@ -30,7 +30,7 @@ export class VectorStoreService implements OnModuleInit {
 
   private async initializeVectorStore() {
     // Fetch all words and definitions
-    const words = await this.wordRepository.find({
+    const words: Word[] = await this.wordRepository.find({
       relations: ['definitions'],
     });
 
@@ -58,7 +58,7 @@ export class VectorStoreService implements OnModuleInit {
             type: 'definition',
             id: def.id,
             wordId: word.id,
-            source: `www.qamous.org/word/${word.id}`  // Update the source format
+            source: `www.qamous.org/word/${word.id}`
           }
         }));
       });
