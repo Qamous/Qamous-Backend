@@ -15,8 +15,8 @@ export class ModelService {
   private groq: ChatGroq;
   private gemini: GoogleGenerativeAI;
   private readonly languagePrompts = {
-    arabic: 'Respond in Arabic (العربية):',
-    'franco-arabic': 'Respond in Franco-Arabic (3arabizi):',
+    'arabic': 'Respond in Arabic (العربية). Use only Arabic script.',
+    'franco-arabic': 'Respond with both English and Franco-Arabic transliterations. For each Arabic word, provide its Franco-Arabic (3arabizi) version in parentheses. For example: "Hello (mar7aba)".',
   };
 
   constructor() {
@@ -34,8 +34,8 @@ export class ModelService {
 
   async generateResponse(params: GenerateParams): Promise<{ response: string; sources: string[] }> {
     const { prompt, model, language } = params;
-    const langPrompt = this.languagePrompts[language];
-    const fullPrompt = `${langPrompt}\n\n${prompt}`;
+    const langPrompt: string = this.languagePrompts[language];
+    const fullPrompt: string = `${langPrompt}\n\n${prompt}`;
 
     try {
       switch (model) {
