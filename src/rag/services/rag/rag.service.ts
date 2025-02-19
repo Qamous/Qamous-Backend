@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from "@nestjs/typeorm";
 import { Word } from "../../../typeorm/entities/word";
-import { Repository } from "typeorm";
+import { Like, Repository } from "typeorm";
 import { Definition } from "../../../typeorm/entities/definition";
 import { In } from 'typeorm';
 import { RagRequest, RagResponse } from "../../dtos/rag.dto";
@@ -12,7 +12,8 @@ interface CitedWord {
   id: number;
   arabicWord: string;
   francoArabicWord?: string;
-  definition: string;
+  arabicDefinition?: string;
+  englishDefinition?: string;
   example?: string;
 }
 
@@ -33,12 +34,15 @@ export class RagService {
 
     // 2. Look up known words and their definitions
     const knownWords: Word[] = await this.findKnownWords(words);
+    console.log("knownWords: ", knownWords);
 
     // 3. Create a map of known words for easy lookup
     const wordMap: Map<string, Word> = new Map(knownWords.map(word => [word.arabicWord, word]));
+    console.log("wordMap: ", wordMap);
 
     // 4. Retrieve the context vector for the query
     const vectorContext: string = await this.vectorStore.retrieveContext(request.query);
+    console.log("vectorContext: ", vectorContext);
 
     // 5. Build an augmented context for the model
     const augmentedContext: string = this.buildAugmentedContext(
@@ -61,7 +65,8 @@ export class RagService {
       sources: citedWords.map(word => `www.qamous.org/word/${word.id}`),
       definitions: citedWords.map(word => ({
         word: word.arabicWord,
-        meaning: word.definition,
+        // Give preference to the requested language, but fallback to the other language if not available
+        meaning: request.preferredLanguage === 'arabic' ? (word.arabicDefinition || word.englishDefinition) : (word.englishDefinition || word.arabicDefinition),
         example: word.example
       }))
     };
@@ -75,15 +80,19 @@ export class RagService {
     const arabicWordRegex: RegExp = /[\u0600-\u06FF]+/g;
     const words: RegExpMatchArray | [] = response.match(arabicWordRegex) || [];
 
+
     words.forEach(word => {
       if (!usedWords.has(word) && wordMap.has(word)) {
         const dbWord: Word = wordMap.get(word);
+        const englishDef: Definition = dbWord.definitions.find(d => !d.isArabic);
+        const arabicDef: Definition = dbWord.definitions.find(d => d.isArabic);
         usedWords.add(word);
         citedWords.push({
           id: dbWord.id,
           arabicWord: dbWord.arabicWord,
           francoArabicWord: dbWord.francoArabicWord || undefined,
-          definition: dbWord.definitions[0]?.definition || '',
+          arabicDefinition: arabicDef?.definition || undefined,
+          englishDefinition: englishDef?.definition || undefined,
           example: dbWord.definitions[0]?.example
         });
       }
@@ -98,20 +107,22 @@ export class RagService {
       if (preferredLanguage === 'arabic') {
         formattedResponse += '\n\n### المراجع والتعريفات\n';
         citedWords.forEach(word => {
-          formattedResponse += `- **[${word.arabicWord}](www.qamous.org/word/${word.id})**: ${word.definition}\n`;
-          if (word.example) {
-            formattedResponse += `  مثال: ${word.example}\n`;
-          }
+          formattedResponse += `- **[${word.arabicWord}](/word/${word.id})**: ${word.arabicDefinition || word.englishDefinition} ${!word.arabicDefinition ? '(التعريف العربي غير متوفر على قاموس، لا تتردد في إضافته!)' : ''}\n`;
+          // Current examples are in English, so we don't include them TODO: Add Arabic examples
+          // if (word.example) {
+          //   formattedResponse += `  مثال: ${word.example}\n`;
+          // }
         });
       } else { // franco-arabic
         formattedResponse += '\n\n### References and Definitions\n';
         citedWords.forEach(word => {
           // Include both Arabic and Franco-Arabic versions
-          formattedResponse += `- **[${word.arabicWord}](www.qamous.org/word/${word.id})** (${word.francoArabicWord}): ${word.definition}\n`;
+          formattedResponse += `- **[${word.arabicWord}](/word/${word.id})** (${word.francoArabicWord}): ${word.englishDefinition || word.arabicDefinition} ${!word.englishDefinition ? '(English definition not available on Qamous, feel free to add it!)' : ''}\n`;
           if (word.example) {
             formattedResponse += `  Example: ${word.example}\n`;
           }
         });
+        console.log(formattedResponse);
       }
     }
 
@@ -151,10 +162,19 @@ Instructions:
   }
 
   private async findKnownWords(words: string[]): Promise<Word[]> {
+    // Create LIKE patterns for each word
+    const likePatterns = words.map(word => `%${word}%`);
+
     return this.wordRepository.find({
       where: [
-        { arabicWord: In(words) },
-        { francoArabicWord: In(words) }
+        { arabicWord: In(words) },         // Exact matches
+        { francoArabicWord: In(words) },   // Exact matches
+        ...likePatterns.map(pattern => ({  // Partial matches
+          arabicWord: Like(pattern)
+        })),
+        ...likePatterns.map(pattern => ({  // Partial matches
+          francoArabicWord: Like(pattern)
+        }))
       ],
       relations: ['definitions'],
       take: 10 // Limit results for performance
