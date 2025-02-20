@@ -107,7 +107,7 @@ export class RagService {
       if (preferredLanguage === 'arabic') {
         formattedResponse += '\n\n### المراجع والتعريفات\n';
         citedWords.forEach(word => {
-          formattedResponse += `- **[${word.arabicWord}](/word/${word.id})**: ${word.arabicDefinition || word.englishDefinition} ${!word.arabicDefinition ? '(التعريف العربي غير متوفر على قاموس، لا تتردد في إضافته!)' : ''}\n`;
+          formattedResponse += `- **[${word.arabicWord}](https://qamous.org/word/${word.id})**: ${word.arabicDefinition || word.englishDefinition} ${!word.arabicDefinition ? '(التعريف العربي غير متوفر على قاموس، لا تتردد في إضافته!)' : ''}\n`;
           // Current examples are in English, so we don't include them TODO: Add Arabic examples
           // if (word.example) {
           //   formattedResponse += `  مثال: ${word.example}\n`;
@@ -117,7 +117,7 @@ export class RagService {
         formattedResponse += '\n\n### References and Definitions\n';
         citedWords.forEach(word => {
           // Include both Arabic and Franco-Arabic versions
-          formattedResponse += `- **[${word.arabicWord}](/word/${word.id})** (${word.francoArabicWord}): ${word.englishDefinition || word.arabicDefinition} ${!word.englishDefinition ? '(English definition not available on Qamous, feel free to add it!)' : ''}\n`;
+          formattedResponse += `- **[${word.arabicWord}](https://qamous.org/word/${word.id})** (${word.francoArabicWord}): ${word.englishDefinition || word.arabicDefinition} ${!word.englishDefinition ? '(English definition not available on Qamous, feel free to add it!)' : ''}\n`;
           if (word.example) {
             formattedResponse += `  Example: ${word.example}\n`;
           }
