@@ -21,7 +21,7 @@ import {
 } from '../../../../safe/new-password-hashing';
 import { validateFields } from '../../utils/validation';
 import { plainToClass } from 'class-transformer';
-import { AuthenticatedGuard } from "../../../utils/local.guard";
+import { AuthenticatedGuard } from "../../../utils/guards/local.guard";
 import { UserRequest } from "../../../utils/types";
 import { Throttle } from "@nestjs/throttler";
 

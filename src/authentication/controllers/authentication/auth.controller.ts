@@ -10,7 +10,7 @@ import {
 import { Request as ExpressRequest, Response, NextFunction } from 'express';
 import { Session } from 'express-session';
 import { Throttle } from '@nestjs/throttler';
-import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/guards/local.guard';
 
 @Controller('auth')
 export class AuthController {

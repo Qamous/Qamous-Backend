@@ -12,7 +12,7 @@ import {
 import { WordReport } from '../../../typeorm/entities/word-report';
 import { WordReportsService } from '../../services/word-reports/word-reports.service';
 import { CreateWordReportDto } from '../../dtos/create-word-report.dto';
-import { AuthenticatedGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard } from '../../../utils/guards/local.guard';
 import { RequestType } from 'express-serve-static-core';
 
 @Controller('word-reports')
