@@ -43,6 +43,8 @@ export class ModelService {
           return this.generateGroqResponse(fullPrompt);
         case 'gemini':
           return this.generateGeminiResponse(fullPrompt);
+        case 'groq-3':
+        case 'gemini-pro':
         case 'gpt4':
         case 'mistral':
           throw new Error(`Model ${model} not implemented yet`);

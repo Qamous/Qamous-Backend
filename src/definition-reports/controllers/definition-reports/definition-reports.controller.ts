@@ -13,7 +13,7 @@ import {
 import { DefinitionReportsService } from '../../services/definition-reports/definition-reports.service';
 import { CreateDefinitionReportDto } from '../../dtos/create-definition-report.dto';
 import { UpdateDefinitionReportDto } from '../../dtos/update-definition-report.dto';
-import { AuthenticatedGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard } from '../../../utils/guards/local.guard';
 import { RequestType } from 'express-serve-static-core';
 import { DefinitionReport } from '../../../typeorm/entities/definition-report';
 
