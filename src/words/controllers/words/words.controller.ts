@@ -14,7 +14,7 @@ import { Word } from '../../../typeorm/entities/word';
 import { CreateWordDto } from '../../dtos/create-word.dto';
 import { UpdateWordDto } from '../../dtos/update-word.dto';
 import { UpdateResult } from 'typeorm';
-import { AuthenticatedGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard } from '../../../utils/guards/local.guard';
 import { RequestType } from 'express-serve-static-core';
 
 @Controller('word')

@@ -27,7 +27,9 @@ import { DefinitionReportsModule } from './definition-reports/definition-reports
 import { DefinitionReport } from './typeorm/entities/definition-report';
 import { RagModule } from './rag/rag.module';
 import { ModelService } from './rag/services/model/model.service';
-import { VectorStoreService } from './rag/services/vector-store/vector-store.service';
+import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
+import { ConfigModule } from "@nestjs/config";
+
 
 dotenv.config({ path: './safe/.env' });
 
@@ -81,6 +83,9 @@ dotenv.config({ path: './safe/.env' });
         },
       }),
     }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     PassportModule.register({ session: true }),
     UsersModule,
     CountriesModule,
@@ -91,6 +96,7 @@ dotenv.config({ path: './safe/.env' });
     AuthModule,
     DefinitionReportsModule,
     RagModule,
+    SubscriptionsModule,
   ],
   controllers: [AppController, AuthController, DefinitionReportsController],
   providers: [AppService, ModelService],
