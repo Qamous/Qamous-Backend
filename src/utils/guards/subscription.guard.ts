@@ -1,9 +1,9 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { SubscriptionService } from "../../subscriptions/services/subscriptions/subscriptions.service";
+import { SubscriptionsService } from "../../subscriptions/services/subscriptions/subscriptions.service";
 
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
-  constructor(private subscriptionService: SubscriptionService) {}
+  constructor(private subscriptionService: SubscriptionsService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
