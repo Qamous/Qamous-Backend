@@ -1,15 +1,15 @@
 import { Controller, Post, Get, UseGuards, Req, Res, RawBodyRequest } from "@nestjs/common";
 import { Response, Request } from "express";
 import { ConfigService } from "@nestjs/config";
-import { SubscriptionService } from "../../services/subscriptions/subscriptions.service";
+import { SubscriptionsService } from "../../services/subscriptions/subscriptions.service";
 import { AuthenticatedGuard } from "../../../utils/guards/local.guard";
 import { RequestType } from "express-serve-static-core";
 import { Stripe } from "stripe";
 
 @Controller("subscriptions")
-export class SubscriptionController {
+export class SubscriptionsController {
   constructor(
-    private subscriptionService: SubscriptionService,
+    private subscriptionService: SubscriptionsService,
     private configService: ConfigService
   ) {
   }

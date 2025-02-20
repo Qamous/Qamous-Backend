@@ -7,7 +7,7 @@ import { Stripe } from "stripe";
 import { InjectStripeClient } from "@golevelup/nestjs-stripe";
 
 @Injectable()
-export class SubscriptionService {
+export class SubscriptionsService {
   constructor(
     @InjectRepository(Subscription)
     private subscriptionRepository: Repository<Subscription>,
