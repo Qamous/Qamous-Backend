@@ -149,7 +149,7 @@ ${vectorContext}
 
 Instructions:
 1. Provide a response in markdown format
-2. Use words from our dictionary when they are relevant
+2. Use ALL relevant words from our dictionary
 3. Do not make up or include citations for words not in our dictionary
 4. Use Arabic language
 5. Focus on accuracy and cultural relevance
