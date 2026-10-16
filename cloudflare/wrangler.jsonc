@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qamous-api",
+  "account_id": "39292a971f28b413619657e9f2c77003",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{"pattern":"api.qamous.org","custom_domain":true}],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "qamous",
+    "database_id": "d0587244-4f3d-4209-b246-55cefbce7555",
+    "migrations_dir": "migrations"
+  }],
+  "durable_objects": {
+    "bindings": [{"name": "RUNTIME", "class_name": "QamousRuntime"}]
+  },
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["QamousRuntime"]}],
+  "ai": {"binding": "AI"},
+  "vars": {
+    "APP_URL": "https://qamous.org",
+    "ALLOWED_ORIGINS": "https://qamous.org,https://www.qamous.org,https://qamous-web.anthonyyoussef01.workers.dev",
+    "AI_DAILY_LIMIT": "50",
+    "EMAIL_DAILY_LIMIT": "30",
+    "ENABLE_AI": "true"
+  },
+  "observability": {"enabled": true, "head_sampling_rate": 0.05, "logs": {"invocation_logs": false}}
+}

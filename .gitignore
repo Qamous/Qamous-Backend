@@ -80,3 +80,12 @@ copilot/
 
 # db test
 test-db-connection.ts
+
+# Cloudflare local state, credentials and private restoration data
+cloudflare/node_modules/
+!cloudflare/package-lock.json
+cloudflare/.wrangler/
+cloudflare/.dev.vars*
+cloudflare/private/
+cloudflare/dist/
+.playwright-mcp/
