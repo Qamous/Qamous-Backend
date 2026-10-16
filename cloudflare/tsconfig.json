@@ -7,6 +7,7 @@
     "types": ["./worker-configuration.d.ts", "node"],
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true

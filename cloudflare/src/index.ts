@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import { ApiError, type Row, type UserRow, type DictionaryRow, text, positiveId, normalize, escapeLike, nowSql, publicUser, requireUser, rankedSql, personalJoinWord, withWord } from './data';
 import { loadSession, createSession, logout, runtime, checkRate, digest, token, type AppContext } from './security';
 import { countryCodes } from '../../src/utils/country-codes';
+import { validateWriteRequest, requireJson } from './request-policy';
 export { QamousRuntime } from './runtime';
 
 const app=new Hono<AppContext>();
@@ -12,6 +13,7 @@ const withoutSearch=(row:Row)=>{const {searchText,...rest}=row;return rest;};
 const changed={generatedMaps:[],raw:[],affected:1};
 const deleted={raw:[],affected:1};
 async function body(c:Context<AppContext>):Promise<Row> {
+  requireJson(c.req.raw.headers);
   try {const v=await c.req.json();if(v&&typeof v==='object'&&!Array.isArray(v)) return v;}catch{}
   throw new ApiError(400,'Invalid JSON request body');
 }
@@ -33,12 +35,22 @@ function email(value:unknown):string {
 }
 function quotaMessage(error:Error) {return /limit|quota|resource|exceeded/i.test(error.message);}
 
+app.use('*',async(c,next)=>{
+  c.header('X-Content-Type-Options','nosniff');
+  c.header('X-Frame-Options','DENY');
+  c.header('Referrer-Policy','no-referrer');
+  c.header('X-Robots-Tag','noindex, nofollow, noarchive');
+  c.header('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+  c.header('Cache-Control','no-store');
+  await next();
+});
 app.use('*',bodyLimit({maxSize:32768,onError:c=>c.json({message:'Request body is too large'},413)}));
 app.use('*',cors({origin:(origin,c)=>c.env.ALLOWED_ORIGINS.split(',').includes(origin)?origin:undefined,credentials:true,allowMethods:['GET','POST','PATCH','DELETE','PUT','OPTIONS'],allowHeaders:['Content-Type','Authorization']}));
 app.use('*',async(c,next)=>{
-  c.header('X-Content-Type-Options','nosniff');c.header('Cache-Control','no-store');
-  const origin=c.req.header('origin');
-  if(!['GET','HEAD','OPTIONS'].includes(c.req.method)&&origin&&!c.env.ALLOWED_ORIGINS.split(',').includes(origin)) throw new ApiError(403,'Origin is not allowed');
+  validateWriteRequest(c.req.method,c.req.raw.headers,c.env.ALLOWED_ORIGINS.split(','));
+  // Keep the deployed read API bounded per client, including workers.dev where
+  // zone WAF rules do not run. This is not a claim of scraper-proof public data.
+  if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)) await checkRate(c,'read-api',120,60);
   await loadSession(c);await next();
 });
 app.onError((error,c)=>{
@@ -49,10 +61,11 @@ app.onError((error,c)=>{
   return c.json({statusCode:503,message:quotaMessage(error)?'The free service limit is temporarily unavailable. Please try again later.':'The service is temporarily unavailable. Please try again later.'},503);
 });
 app.get('/',c=>c.json({service:'Qamous',status:'OK'}));
+app.get('/robots.txt',c=>c.text('User-agent: *\nDisallow: /\n'));
 app.get('/auth/health',async c=>{await c.env.DB.prepare('SELECT 1').first();return c.json({status:'OK'});});
 app.get('/auth/session',c=>{
   const user=c.get('user');
-  return c.json({session:user?{passport:{user:publicUser(user,true)}}:{},sessionId:user?c.get('sessionKey'):null,authenticated:!!user});
+  return c.json({session:user?{passport:{user:publicUser(user,true)}}:{},sessionId:user?'authenticated':null,authenticated:!!user});
 });
 app.post('/auth/login',async c=>{
   await checkRate(c,'login',5,300);
@@ -69,6 +82,7 @@ app.post('/auth/login',async c=>{
 app.post('/auth/logout',async c=>{await logout(c);return c.json({message:'Logged out successfully'});});
 
 app.get('/users',async c=>{
+  admin(c);
   const users=(await c.env.DB.prepare('SELECT * FROM users ORDER BY id').all<UserRow>()).results;
   return c.json(users.map(u=>publicUser(u)));
 });
@@ -95,6 +109,7 @@ app.post('/users/register',async c=>{
 });
 app.patch('/users/:id',async c=>{
   const id=positiveId(c.req.param('id'));const user=owner(c,id);const data=await body(c);
+  await checkRate(c,'account-change',5,300);
   if(typeof data.oldPassword!=='string'||!await runtime(c.env,`password:${user.id}`).verifyPassword(data.oldPassword,user.password,user.passwordVersion)) throw new ApiError(400,'Old password is incorrect');
   const sets:string[]=[],values:(string|number|null)[]=[];
   for(const field of ['firstName','lastName','username','dateOfBirth'] as const) if(data[field]!==undefined) {sets.push(`"${field}"=?`);values.push(text(data[field],field,field==='dateOfBirth'?40:80));}
@@ -105,6 +120,10 @@ app.patch('/users/:id',async c=>{
   }
   if(!sets.length) throw new ApiError(400,'No changes provided');
   await c.env.DB.prepare(`UPDATE users SET ${sets.join(',')} WHERE id=?`).bind(...values,id).run();
+  if(data.password) {
+    await c.env.DB.prepare("DELETE FROM sessions WHERE json_extract(data,'$.userId')=?").bind(id).run();
+    await createSession(c,id);
+  }
   return c.json(changed);
 });
 app.delete('/users/:id',async c=>{
@@ -160,7 +179,7 @@ app.post('/countries',async c=>{admin(c);const data=await body(c);const row=awai
 app.patch('/countries/:code',async c=>{admin(c);const data=await body(c);await c.env.DB.prepare('UPDATE countries SET countryName=? WHERE countryCode=?').bind(text(data.countryName,'countryName'),c.req.param('code')).run();return c.json(changed);});
 app.delete('/countries/:code',async c=>{admin(c);await c.env.DB.prepare('DELETE FROM countries WHERE countryCode=?').bind(c.req.param('code')).run();return c.json(deleted);});
 
-app.get('/word/search/all',async c=>c.json((await c.env.DB.prepare('SELECT id,userId,arabicWord,francoArabicWord,createdAt,reportCount FROM words ORDER BY id').all()).results));
+app.get('/word/search/all',async c=>{admin(c);return c.json((await c.env.DB.prepare('SELECT id,userId,arabicWord,francoArabicWord,createdAt,reportCount FROM words ORDER BY id').all()).results);});
 app.get('/word/search/:filter',async c=>{
   const filter=c.req.param('filter');const user=c.get('user')?.id||0;
   if(filter.startsWith('kwd=')) {
@@ -207,7 +226,7 @@ app.get('/definitions/random-matching',async c=>{
   if(!word) return c.json([]);const user=c.get('user')?.id||0;
   return c.json((await c.env.DB.prepare(rankedSql('AND d.wordId=?')).bind(user,user,user,word.wordId).all()).results);
 });
-app.get('/definitions/user/:id',async c=>{const user=c.get('user')?.id||0;return c.json((await c.env.DB.prepare(personalJoinWord+' WHERE d.userId=? ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord));});
+app.get('/definitions/user/:id',async c=>{const user=owner(c,positiveId(c.req.param('id'))).id;return c.json((await c.env.DB.prepare(personalJoinWord+' WHERE d.userId=? ORDER BY d.id').bind(user,user,user,user).all()).results.map(withWord));});
 app.get('/definitions/word/:id',async c=>{const user=c.get('user')?.id||0;return c.json((await c.env.DB.prepare(personalJoinWord+' WHERE d.wordId=? AND (d.reportCount+w.reportCount)<5 ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord));});
 app.get('/definitions/:id/country',async c=>{
   const row=await c.env.DB.prepare('SELECT c.* FROM countries c JOIN definitions d ON d.countryCode=c.countryCode WHERE d.id=?').bind(positiveId(c.req.param('id'))).first();
@@ -217,7 +236,7 @@ app.get('/definitions/:id',async c=>{
   const row=await c.env.DB.prepare('SELECT * FROM definitions WHERE id=?').bind(positiveId(c.req.param('id'))).first();
   if(!row) throw new ApiError(404,'Definition not found');return c.json(withoutSearch(row));
 });
-app.get('/definitions',async c=>c.json((await c.env.DB.prepare('SELECT * FROM definitions ORDER BY id').all()).results.map(withoutSearch)));
+app.get('/definitions',async c=>{admin(c);return c.json((await c.env.DB.prepare('SELECT * FROM definitions ORDER BY id').all()).results.map(withoutSearch));});
 app.post('/definitions',async c=>{
   const user=requireUser(c.get('user'));await checkRate(c,'add-definition',30,3600);const data=await body(c);
   const wordId=positiveId(String(data.wordId)),definition=text(data.definition,'definition',10000),example=data.example?text(data.example,'example',255):null;
@@ -264,7 +283,7 @@ app.post('/reactions/:id/:action',async c=>{
 });
 app.get('/reactions/:id/:kind',async c=>{
   const id=positiveId(c.req.param('id')),kind=c.req.param('kind');
-  if(kind==='likes-dislikes') return c.json((await c.env.DB.prepare('SELECT * FROM "definition-likes-dislikes" WHERE definitionId=? ORDER BY id').bind(id).all()).results);
+  if(kind==='likes-dislikes') {admin(c);return c.json((await c.env.DB.prepare('SELECT * FROM "definition-likes-dislikes" WHERE definitionId=? ORDER BY id').bind(id).all()).results);}
   if(kind==='likes'||kind==='dislikes'){const row=await c.env.DB.prepare(`SELECT ${kind==='likes'?'likeCount':'dislikeCount'} AS count FROM definitions WHERE id=?`).bind(id).first<{count:number}>();return c.json(row?.count||0);}
   throw new ApiError(404,'Reaction route not found');
 });

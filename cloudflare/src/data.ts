@@ -18,7 +18,8 @@ export const positiveId = (value:string) => {
   return n;
 };
 export class ApiError extends Error {
-  constructor(public readonly status:400|401|403|404|409|413|429|503, message:string) {super(message);}
+  readonly status:400|401|403|404|409|413|415|429|503;
+  constructor(status:ApiError['status'], message:string) {super(message);this.status=status;}
 }
 export function text(value:unknown, field:string, max=255, required=true):string {
   if(typeof value!=='string'||(required&&!value.trim())||value.length>max) throw new ApiError(400,`Invalid ${field}`);

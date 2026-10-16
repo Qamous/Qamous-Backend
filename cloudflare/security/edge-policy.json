@@ -1,0 +1,108 @@
+{
+  "settings": {
+    "appliedAt": "2026-10-16T20:53:01.045Z",
+    "zonePlan": "Free Website",
+    "price": 0,
+    "hsts": {
+      "appliedAt": "2026-10-16T21:19:23.519825Z",
+      "enabled": true,
+      "max_age": 15552000,
+      "include_subdomains": false,
+      "preload": false,
+      "nosniff": true
+    },
+    "changes": [
+      {
+        "id": "always_use_https",
+        "value": "on",
+        "modified_on": "2026-10-16T20:52:59.583478Z",
+        "editable": true
+      },
+      {
+        "id": "min_tls_version",
+        "value": "1.2",
+        "modified_on": null,
+        "editable": true
+      },
+      {
+        "id": "ssl",
+        "value": "strict",
+        "modified_on": "2026-10-16T20:53:00.269555Z",
+        "certificate_status": "active",
+        "validation_errors": [],
+        "editable": true
+      }
+    ],
+    "bots": {
+      "enable_js": false,
+      "fight_mode": false,
+      "ai_bots_protection": "disabled",
+      "content_bots_protection": "disabled",
+      "crawler_protection": "disabled",
+      "ai_training": "block",
+      "ai_search": "disabled",
+      "ai_user": "disabled",
+      "is_robots_txt_managed": false,
+      "bot_preference_sync_enabled": false,
+      "cf_robots_variant": "policy_only",
+      "ai_bots_migration_opt_out": false,
+      "using_latest_model": true
+    }
+  },
+  "rules": {
+    "appliedAt": "2026-10-16T21:00:42.472Z",
+    "custom": {
+      "description": "Free-plan protections; preserve verified search crawlers",
+      "id": "5d00d1d279484b5192f370d0efc445fd",
+      "kind": "zone",
+      "last_updated": "2026-10-16T21:00:41.426853Z",
+      "name": "Qamous free security controls",
+      "phase": "http_request_firewall_custom",
+      "rules": [
+        {
+          "action": "block",
+          "description": "Block secret-file and unused legacy admin probes",
+          "enabled": true,
+          "expression": "starts_with(lower(http.request.uri.path), \"/.git\") or starts_with(lower(http.request.uri.path), \"/.env\") or starts_with(lower(http.request.uri.path), \"/wp-admin\") or lower(http.request.uri.path) eq \"/wp-login.php\" or starts_with(lower(http.request.uri.path), \"/phpmyadmin\")",
+          "id": "601f4e8fa2fb4bdfa3368569b9f7d49c",
+          "last_updated": "2026-10-16T21:00:41.426853Z",
+          "ref": "qamous_block_secret_and_legacy_admin_probes",
+          "version": "1"
+        }
+      ],
+      "source": "firewall_custom",
+      "version": "1"
+    },
+    "rate": {
+      "description": "Free-plan protections; preserve verified search crawlers",
+      "id": "40fb61e71a1c4e0b99fd8ea5998e8755",
+      "kind": "zone",
+      "last_updated": "2026-10-16T21:00:42.349635Z",
+      "name": "Qamous free security controls",
+      "phase": "http_ratelimit",
+      "rules": [
+        {
+          "action": "block",
+          "description": "60 data/page requests per 10 seconds per IP; verified search bots exempt",
+          "enabled": true,
+          "expression": "(starts_with(http.request.uri.path, \"/api/\") or starts_with(http.request.uri.path, \"/word\") or starts_with(http.request.uri.path, \"/definitions\") or starts_with(http.request.uri.path, \"/users\") or starts_with(http.request.uri.path, \"/reactions\") or starts_with(http.request.uri.path, \"/posts\") or starts_with(http.request.uri.path, \"/auth/\") or starts_with(http.request.uri.path, \"/rag\")) and not cf.client.bot",
+          "id": "34270bbd08d84fde89e4fb1795459bc1",
+          "last_updated": "2026-10-16T21:00:42.349635Z",
+          "ratelimit": {
+            "characteristics": [
+              "cf.colo.id",
+              "ip.src"
+            ],
+            "mitigation_timeout": 10,
+            "period": 10,
+            "requests_per_period": 60
+          },
+          "ref": "qamous_public_data_burst_limit",
+          "version": "1"
+        }
+      ],
+      "source": "rate_limit",
+      "version": "1"
+    }
+  }
+}

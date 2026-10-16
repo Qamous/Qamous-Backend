@@ -13,6 +13,7 @@ export async function verifyFreePlan() {
   const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
   const config=JSON.parse(await readFile(resolve(root,'wrangler.jsonc'),'utf8'));
   if(config.account_id!==ACCOUNT_ID||config.name!=='qamous-api') throw new Error('Deployment refused: unexpected account or Worker');
+  if(config.workers_dev!==false||config.preview_urls!==false) throw new Error('Deployment refused: public preview mirrors would bypass zone security');
   const blocked=['r2_buckets','vectorize','hyperdrive','containers','queues','workflows','pipelines','dispatch_namespaces'];
   if(blocked.some(k=>config[k])) throw new Error('Deployment refused: a paid or unapproved binding was found');
   if(config.triggers?.crons?.length) throw new Error('Deployment refused: unexpected background schedules');

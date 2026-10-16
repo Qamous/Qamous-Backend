@@ -3,10 +3,10 @@ import {randomBytes} from 'node:crypto';
 import {readFile,writeFile} from 'node:fs/promises';
 import {verifyFreePlan} from './free-plan-guard.mjs';
 await verifyFreePlan();
-const base='https://qamous-web.anthonyyoussef01.workers.dev/api';
+const base='https://qamous.org/api';
 const fixtureFile='private/live-fixture.json',reportFile='private/live-smoke.json';
 async function call(path,{method='GET',data,cookie}={}) {
-  const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:'https://qamous-web.anthonyyoussef01.workers.dev',...(cookie?{Cookie:cookie}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(60000)});
+  const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:'https://qamous.org',...(cookie?{Cookie:cookie}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(60000)});
   const body=await r.json();
   if(!r.ok) throw new Error(`Live check ${path} failed (${r.status}): ${body.message||'unavailable'}`);
   return {body,cookie:r.headers.getSetCookie().map(c=>c.split(';')[0]).join('; '),secure:r.headers.get('set-cookie')?.includes('Secure')};

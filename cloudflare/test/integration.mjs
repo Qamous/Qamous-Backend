@@ -20,18 +20,19 @@ async function call(path,{method='GET',data,cookie,expected=200,testIp}={}) {
 async function sql(command) {
   const file=new URL('../private/test-operation.sql',import.meta.url);
   await writeFile(file,command);
-  const result=spawnSync(process.execPath,['node_modules/wrangler/bin/wrangler.js','d1','execute','qamous','--local','--file',fileURLToPath(file),'--json'],{encoding:'utf8',windowsHide:true});
+  const result=spawnSync(process.execPath,['node_modules/wrangler/bin/wrangler.js','d1','execute','qamous','--local',...(process.env.QAMOUS_TEST_PERSIST_DIR?['--persist-to',process.env.QAMOUS_TEST_PERSIST_DIR]:[]),'--file',fileURLToPath(file),'--json'],{encoding:'utf8',windowsHide:true});
   if(result.status!==0) throw new Error('Local D1 fixture operation failed');
   return JSON.parse(result.stdout);
 }
 import {fileURLToPath} from 'node:url';
-const before=(await call('/word/search/all')).body;assert.equal(before.length,60);
-assert.equal((await call('/definitions')).body.length,105);
+for(const path of ['/word/search/all','/definitions','/users','/reactions/1/likes-dislikes']) await call(path,{expected:401});
+const counts=await sql('SELECT (SELECT COUNT(*) FROM words) AS words,(SELECT COUNT(*) FROM definitions) AS definitions;');
+assert.equal(counts[0].results[0].words,60);assert.equal(counts[0].results[0].definitions,105);
 assert.equal((await call('/countries')).body.length,17);
 assert.equal((await call('/posts')).body.length,6);
 const feed=(await call('/definitions/most-liked?page=1&limit=10')).body;assert.equal(feed.length,10);
 assert.ok(feed.every(d=>d.wordId&&d.definitionId&&typeof d.isArabic==='number'));
-const source=before.find(w=>w.francoArabicWord);assert.ok(source);
+const source=feed.find(w=>w.francoArabicWord);assert.ok(source);
 assert.ok((await call('/word/search/kwd='+encodeURIComponent(source.francoArabicWord))).body.length>0);
 assert.ok((await call('/word/search/kwd='+encodeURIComponent(source.arabicWord))).body.length>0);
 assert.equal((await call('/auth/session')).body.authenticated,false);
@@ -59,7 +60,7 @@ assert.equal((await call('/definitions/'+definition.id)).body.definition,'معن
 await call(`/reactions/${definition.id}/like`,{method:'POST',cookie:author.cookie,expected:403});
 await Promise.all(Array.from({length:12},()=>call(`/reactions/${definition.id}/like`,{method:'POST',cookie:reader.cookie})));
 assert.equal((await call('/definitions/'+definition.id)).body.likeCount,1);
-assert.equal((await call(`/reactions/${definition.id}/likes-dislikes`)).body.length,1);
+assert.equal((await sql(`SELECT COUNT(*) AS n FROM "definition-likes-dislikes" WHERE definitionId=${definition.id};`))[0].results[0].n,1);
 assert.equal((await call('/users/me/points',{cookie:author.cookie})).body.points,3);
 await call(`/reactions/${definition.id}/switch-reaction`,{method:'POST',cookie:reader.cookie,data:{toReaction:'dislike'}});
 assert.equal((await call('/definitions/'+definition.id)).body.dislikeCount,1);
@@ -69,10 +70,16 @@ await call('/definition-reports',{method:'POST',cookie:reader.cookie,data:{defin
 await call('/definition-reports',{method:'POST',cookie:reader.cookie,data:{definitionId:definition.id,reportText:'Fixture'},expected:201});
 assert.equal((await call('/definitions/'+definition.id)).body.reportCount,1);
 const post=(await call('/posts',{method:'POST',cookie:author.cookie,data:{title:'Migration test',content:'**Markdown** test',userId:'7'},expected:201})).body;assert.equal(post.userId,String(author.id));
-assert.equal((await call('/definitions/user/'+author.id)).body[0].word.id,word.id);
-assert.equal((await call('/definitions/user/'+author.id)).body[0].isArabic,true);
+assert.equal((await call('/definitions/user/'+author.id,{cookie:author.cookie})).body[0].word.id,word.id);
+assert.equal((await call('/definitions/user/'+author.id,{cookie:author.cookie})).body[0].isArabic,true);
+await call('/definitions/user/'+author.id,{cookie:reader.cookie,expected:403});
 const csrf=await fetch(base+'/auth/logout',{method:'POST',headers:{Origin:'https://malicious.invalid',Cookie:author.cookie}});assert.equal(csrf.status,403);
 await call('/auth/logout',{method:'POST',cookie:reader.cookie});assert.equal((await call('/auth/session',{cookie:reader.cookie})).body.authenticated,false);
+const secondSession=await call('/auth/login',{method:'POST',data:{username:author.username,password:pass}});
+const passwordChange=await call('/users/'+author.id,{method:'PATCH',cookie:author.cookie,data:{oldPassword:pass,password:pass+'changed',passwordConfirmation:pass+'changed'}});
+assert.equal((await call('/auth/session',{cookie:secondSession.cookie})).body.authenticated,false);
+assert.equal((await call('/auth/session',{cookie:author.cookie})).body.authenticated,false);
+assert.equal((await call('/auth/session',{cookie:passwordChange.cookie})).body.authenticated,true);
 await call('/rag',{method:'POST',data:{query:'What is this?'},expected:503});
 await call('/users/reset-password',{method:'POST',data:{email:author.email},expected:503});
 
@@ -95,8 +102,13 @@ await call('/users/reset-password/'+resetToken,{method:'POST',data:{newPassword:
 assert.equal((await call('/auth/session',{cookie:legacy.cookie})).body.authenticated,false);
 const renewed=await call('/auth/login',{method:'POST',data:{username:legacyName,password:resetPass}});
 const session=(await call('/auth/session',{cookie:renewed.cookie})).body;
-await sql(`UPDATE sessions SET expires=0 WHERE session_id=${sqlLiteral(session.sessionId)};`);
+assert.equal(session.sessionId,'authenticated');
+await sql("UPDATE sessions SET expires=0 WHERE json_extract(data,'$.userId')=100000;");
 assert.equal((await call('/auth/session',{cookie:renewed.cookie})).body.authenticated,false);
 for(let n=0;n<5;n++) await call('/auth/login',{method:'POST',testIp:'198.51.100.19',data:{username:'missing',password:'wrong'},expected:401});
 await call('/auth/login',{method:'POST',testIp:'198.51.100.19',data:{username:'missing',password:'wrong'},expected:429});
-console.log(JSON.stringify({passed:true,checks:['source counts','Arabic and Franco search','registration','legacy password upgrade','login/logout/expiry','single-use reset','ownership','contributions','concurrent idempotent reactions','points','reports','blog author identity','CSRF','login throttle','AI unavailable','email unavailable'],testData:'local only'}));
+const missingOrigin=await fetch(base+'/auth/logout',{method:'POST',headers:{Cookie:passwordChange.cookie}});assert.equal(missingOrigin.status,403);
+const plain=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'text/plain',Origin:'http://localhost:8788','CF-Connecting-IP':'198.51.100.20'},body:JSON.stringify({username:'missing',password:'wrong'})});assert.equal(plain.status,415);
+for(let n=0;n<120;n++) await call('/countries',{testIp:'198.51.100.21'});
+await call('/countries',{testIp:'198.51.100.21',expected:429});
+console.log(JSON.stringify({passed:true,checks:['source counts','Arabic and Franco search','registration','legacy password upgrade','login/logout/expiry','single-use reset','ownership','contributions','concurrent idempotent reactions','points','reports','blog author identity','CSRF','missing-origin rejection','JSON-only writes','password-change session revocation','bulk export denied','API read throttle','login throttle','AI unavailable','email unavailable'],testData:'local only'}));
