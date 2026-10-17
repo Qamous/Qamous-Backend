@@ -86,7 +86,15 @@ app.get('/users',async c=>{
   const users=(await c.env.DB.prepare('SELECT * FROM users ORDER BY id').all<UserRow>()).results;
   return c.json(users.map(u=>publicUser(u)));
 });
-app.get('/users/me/points',c=>c.json({points:requireUser(c.get('user')).points}));
+app.get('/users/me/points',async c=>{
+  const user=requireUser(c.get('user'));
+  const row=await c.env.DB.prepare(`SELECT COUNT(*) AS definitionPoints,
+    COALESCE(SUM(contributionPoints-1),0) AS wordBonusPoints,
+    COALESCE(SUM(likeCount-dislikeCount),0) AS reactionPoints,
+    COALESCE(SUM(contributionPoints+likeCount-dislikeCount),0) AS points
+    FROM definitions WHERE userId=?`).bind(user.id).first();
+  return c.json(row);
+});
 app.get('/users/:id/points',async c=>{
   const user=await c.env.DB.prepare('SELECT points FROM users WHERE id=?').bind(positiveId(c.req.param('id'))).first<{points:number}>();
   if(!user) throw new ApiError(404,'User not found');return c.json(user);
@@ -246,11 +254,10 @@ app.post('/definitions',async c=>{
   const countryName=text(data.countryName||'Unknown','countryName');
   let country=await c.env.DB.prepare('SELECT * FROM countries WHERE countryName=? COLLATE NOCASE').bind(countryName).first<{countryCode:string}>();
   if(!country){const code=countryCodes[countryName]||'XX';await c.env.DB.prepare('INSERT OR IGNORE INTO countries(countryCode,countryName) VALUES(?,?)').bind(code,countryName).run();country={countryCode:code};}
-  const results=await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE users SET points=points+1+CASE WHEN EXISTS(SELECT 1 FROM definitions WHERE wordId=?) THEN 0 ELSE 1 END WHERE id=?').bind(wordId,user.id),
-    c.env.DB.prepare('INSERT INTO definitions(wordId,userId,countryCode,definition,example,isArabic,searchText) VALUES(?,?,?,?,?,?,?) RETURNING *').bind(wordId,user.id,country.countryCode,definition,example,isArabic,normalize(definition)),
-  ]);
-  queueEmbedding(c);return c.json(withoutSearch(results[1].results[0] as Row),201);
+  const row=await c.env.DB.prepare(`INSERT INTO definitions(wordId,userId,countryCode,definition,example,isArabic,searchText,contributionPoints)
+    VALUES(?,?,?,?,?,?,?,1+CASE WHEN EXISTS(SELECT 1 FROM definitions WHERE wordId=?) THEN 0 ELSE 1 END) RETURNING *`)
+    .bind(wordId,user.id,country.countryCode,definition,example,isArabic,normalize(definition),wordId).first<Row>();
+  queueEmbedding(c);return c.json(withoutSearch(row!),201);
 });
 app.patch('/definitions/:id',async c=>{
   const user=requireUser(c.get('user')),id=positiveId(c.req.param('id')),data=await body(c);

@@ -76,27 +76,28 @@ export class QamousRuntime extends DurableObject<AppBindings> {
     }finally{mail.close();}
   }
   async react(userId:number,definitionId:number,target:number|null,action:string) {
-    // Routed to one object per definition. Serialize D1 read + atomic batch without
+    // Routed to one object per definition. Serialize D1 read + vote write without
     // blocking the object's input gates across network I/O. A retry reads D1 again.
     const operation=this.reactionTail.then(async()=>{
       const definition=await this.env.DB.prepare('SELECT userId,likeCount,dislikeCount FROM definitions WHERE id=?').bind(definitionId).first<{userId:number;likeCount:number;dislikeCount:number}>();
       if(!definition) return {error:'Definition not found',status:404};
       if(definition.userId===userId) return {error:'You cannot react to your own definitions',status:403};
-      const reactions=(await this.env.DB.prepare('SELECT id,liked FROM "definition-likes-dislikes" WHERE definitionId=? AND userId=? ORDER BY id DESC').bind(definitionId,userId).all<{id:number;liked:number}>()).results;
-      const previous=reactions[0];
+      const previous=await this.env.DB.prepare('SELECT liked FROM "definition-likes-dislikes" WHERE definitionId=? AND userId=?').bind(definitionId,userId).first<{liked:number}>();
+      const state=async()=>{
+        const row=await this.env.DB.prepare(`SELECT d.likeCount,d.dislikeCount,
+          EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=1) AS isLiked,
+          EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=0) AS isDisliked
+          FROM definitions d WHERE d.id=?`).bind(userId,userId,definitionId).first<{likeCount:number;dislikeCount:number;isLiked:number;isDisliked:number}>();
+        if(!row) return {error:'Definition not found',status:404};
+        return {definitionId,...row,isLiked:!!row.isLiked,isDisliked:!!row.isDisliked};
+      };
       if((target===null&&!previous)||(target!==null&&previous?.liked===target)||
-        (action==='unlike'&&previous?.liked!==1)||(action==='undislike'&&previous?.liked!==0)) return {success:false,message:'Reaction is already in the requested state'};
-      const likesDelta=(target===1?1:0)-reactions.filter(r=>r.liked===1).length;
-      const dislikesDelta=(target===0?1:0)-reactions.filter(r=>r.liked===0).length;
-      const pointsDelta=(target===null?0:target===1?1:-1)-(previous?previous.liked===1?1:-1:0);
-      const commands=[
-        this.env.DB.prepare('UPDATE definitions SET likeCount=MAX(0,likeCount+?),dislikeCount=MAX(0,dislikeCount+?) WHERE id=?').bind(likesDelta,dislikesDelta,definitionId),
-        this.env.DB.prepare('UPDATE users SET points=points+?,likesReceived=MAX(0,likesReceived+?) WHERE id=?').bind(pointsDelta,likesDelta,definition.userId),
-        this.env.DB.prepare('DELETE FROM "definition-likes-dislikes" WHERE definitionId=? AND userId=?').bind(definitionId,userId),
-      ];
-      if(target!==null) commands.push(this.env.DB.prepare('INSERT INTO "definition-likes-dislikes"(definitionId,userId,liked) VALUES(?,?,?)').bind(definitionId,userId,target));
-      await this.env.DB.batch(commands);
-      return {success:true,message:target===null?'Reaction removed':target===1?'Successfully liked the definition':'Successfully disliked the definition'};
+        (action==='unlike'&&previous?.liked!==1)||(action==='undislike'&&previous?.liked!==0)) return {success:false,message:'Reaction is already in the requested state',...await state()};
+      // Triggers keep counts and reputation atomic with the vote, including
+      // account deletion and definition ownership changes outside this object.
+      if(target===null) await this.env.DB.prepare('DELETE FROM "definition-likes-dislikes" WHERE definitionId=? AND userId=? AND liked=?').bind(definitionId,userId,previous!.liked).run();
+      else await this.env.DB.prepare('INSERT INTO "definition-likes-dislikes"(definitionId,userId,liked) VALUES(?,?,?) ON CONFLICT(definitionId,userId) DO UPDATE SET liked=excluded.liked').bind(definitionId,userId,target).run();
+      return {success:true,message:target===null?'Reaction removed':target===1?'Successfully liked the definition':'Successfully disliked the definition',...await state()};
     });
     this.reactionTail=operation.then(()=>{},()=>{});
     return operation;

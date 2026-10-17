@@ -109,6 +109,39 @@ for(let n=0;n<5;n++) await call('/auth/login',{method:'POST',testIp:'198.51.100.
 await call('/auth/login',{method:'POST',testIp:'198.51.100.19',data:{username:'missing',password:'wrong'},expected:429});
 const missingOrigin=await fetch(base+'/auth/logout',{method:'POST',headers:{Cookie:passwordChange.cookie}});assert.equal(missingOrigin.status,403);
 const plain=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'text/plain',Origin:'http://localhost:8788','CF-Connecting-IP':'198.51.100.20'},body:JSON.stringify({username:'missing',password:'wrong'})});assert.equal(plain.status,415);
+// Exercise the repaired accounting in the actual local Workers/D1 runtime.
+const readerAgain=await call('/auth/login',{method:'POST',data:{username:reader.username,password:pass}});
+const authorCookie=passwordChange.cookie,readerCookie=readerAgain.cookie;
+const authorPoints=async()=>(await call('/users/me/points',{cookie:authorCookie})).body;
+assert.deepEqual(await authorPoints(),{definitionPoints:1,wordBonusPoints:1,reactionPoints:0,points:2});
+for(const [action,toReaction,delta,liked,disliked] of [
+  ['like',null,1,true,false],['like',null,1,true,false],
+  ['switch-reaction','dislike',-1,false,true],['unlike',null,-1,false,true],
+  ['undislike',null,0,false,false],['dislike',null,-1,false,true],
+  ['switch-reaction','like',1,true,false],['unlike',null,0,false,false],
+]) {
+  const result=(await call(`/reactions/${definition.id}/${action}`,{method:'POST',cookie:readerCookie,...(toReaction?{data:{toReaction}}:{})})).body;
+  assert.equal(result.isLiked,liked);assert.equal(result.isDisliked,disliked);
+  assert.equal(result.definitionId,definition.id);assert.equal((await authorPoints()).points,2+delta);
+}
+const extraWord=(await call('/word',{method:'POST',cookie:authorCookie,data:{arabicWord:'نقاط '+stamp},expected:201})).body;
+for(let i=0;i<2;i++) {
+  const extra=(await call('/definitions',{method:'POST',cookie:authorCookie,data:{wordId:extraWord.id,definition:'Local scoring regression',isArabic:true,countryName:'Egypt'},expected:201})).body;
+  assert.equal((await authorPoints()).points,4);
+  await call(`/reactions/${extra.id}/like`,{method:'POST',cookie:readerCookie});
+  assert.equal((await authorPoints()).points,5);
+  await call('/definitions/'+extra.id,{method:'DELETE',cookie:authorCookie});
+  assert.equal((await authorPoints()).points,2);
+}
+await call(`/reactions/${definition.id}/like`,{method:'POST',cookie:readerCookie});
+await call('/users/'+reader.id,{method:'DELETE',cookie:readerCookie});
+assert.equal((await call('/definitions/'+definition.id)).body.likeCount,0);
+assert.equal((await authorPoints()).points,2);
+await call('/users/'+author.id,{method:'DELETE',cookie:authorCookie});
+assert.equal((await call('/definitions/'+definition.id)).body.userId,7);
+for(const result of await sql(await readFile(new URL('../scripts/audit-reactions.sql',import.meta.url),'utf8'))) {
+  for(const row of result.results) assert.equal(row.violations,0);
+}
 for(let n=0;n<120;n++) await call('/countries',{testIp:'198.51.100.21'});
 await call('/countries',{testIp:'198.51.100.21',expected:429});
-console.log(JSON.stringify({passed:true,checks:['source counts','Arabic and Franco search','registration','legacy password upgrade','login/logout/expiry','single-use reset','ownership','contributions','concurrent idempotent reactions','points','reports','blog author identity','CSRF','missing-origin rejection','JSON-only writes','password-change session revocation','bulk export denied','API read throttle','login throttle','AI unavailable','email unavailable'],testData:'local only'}));
+console.log(JSON.stringify({passed:true,checks:['source counts','Arabic and Franco search','registration','legacy password upgrade','login/logout/expiry','single-use reset','ownership','contributions','concurrent idempotent reactions','canonical reaction responses','points breakdown','definition deletion accounting','voter deletion accounting','archive transfer accounting','create/delete bonus farming prevention','final zero-violation accounting audit','reports','blog author identity','CSRF','missing-origin rejection','JSON-only writes','password-change session revocation','bulk export denied','API read throttle','login throttle','AI unavailable','email unavailable'],testData:'local only'}));
