@@ -6,6 +6,7 @@ import { ApiError, type Row, type UserRow, type DictionaryRow, text, positiveId,
 import { loadSession, createSession, logout, runtime, checkRate, digest, token, type AppContext } from './security';
 import { countryCodes } from '../../src/utils/country-codes';
 import { validateWriteRequest, requireJson } from './request-policy';
+import { exploreQuery } from './explore';
 export { QamousRuntime } from './runtime';
 
 const app=new Hono<AppContext>();
@@ -179,6 +180,15 @@ app.post('/countries',async c=>{admin(c);const data=await body(c);const row=awai
 app.patch('/countries/:code',async c=>{admin(c);const data=await body(c);await c.env.DB.prepare('UPDATE countries SET countryName=? WHERE countryCode=?').bind(text(data.countryName,'countryName'),c.req.param('code')).run();return c.json(changed);});
 app.delete('/countries/:code',async c=>{admin(c);await c.env.DB.prepare('DELETE FROM countries WHERE countryCode=?').bind(c.req.param('code')).run();return c.json(deleted);});
 
+app.get('/word/explore',async c=>{
+  const {countSql,resultsSql,values,page,limit}=exploreQuery(new URL(c.req.url).searchParams);
+  const user=c.get('user')?.id||0;
+  const [count,rows]=await c.env.DB.batch<Row>([
+    c.env.DB.prepare(countSql).bind(...values),
+    c.env.DB.prepare(resultsSql).bind(...values,user,user,user,limit,(page-1)*limit),
+  ]);
+  return c.json({results:rows.results,total:Number(count.results[0]?.total||0),page,limit});
+});
 app.get('/word/search/all',async c=>{admin(c);return c.json((await c.env.DB.prepare('SELECT id,userId,arabicWord,francoArabicWord,createdAt,reportCount FROM words ORDER BY id').all()).results);});
 app.get('/word/search/:filter',async c=>{
   const filter=c.req.param('filter');const user=c.get('user')?.id||0;
