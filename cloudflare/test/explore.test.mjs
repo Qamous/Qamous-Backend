@@ -8,6 +8,7 @@ import { normalize } from '../src/data.ts';
 function fixture() {
   const db = new DatabaseSync(':memory:');
   db.exec(readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0003_contributions.sql', import.meta.url), 'utf8'));
   db.exec(`INSERT INTO countries VALUES ('EG','Egypt'),('LB','Lebanon');
     INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES (1,'Test','User','test@example.invalid','tester','2026-01-01');`);
   const word = db.prepare('INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt,reportCount,searchText) VALUES (?,1,?,?,?,0,?)');

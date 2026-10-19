@@ -1,4 +1,4 @@
-import { ApiError, escapeLike, normalize } from './data.ts';
+import { ApiError, escapeLike, normalize, spellingColumns } from './data.ts';
 
 // Values are bound parameters; only the fixed sort expressions enter the SQL.
 export function exploreQuery(params: URLSearchParams) {
@@ -19,14 +19,16 @@ export function exploreQuery(params: URLSearchParams) {
   const filters = ['w.reportCount<=5', 'd.reportCount<=5'];
   if (query) {
     const columns = scope === 'words' ? ['w.searchText'] : scope === 'definitions' ? ['d.searchText'] : ['w.searchText', 'd.searchText'];
-    filters.push(`(${columns.map(column => `${column} LIKE ? ESCAPE '\\'`).join(' OR ')})`);
+    const aliasMatch = scope !== 'definitions' ? ` OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\')` : '';
+    filters.push(`(${columns.map(column => `${column} LIKE ? ESCAPE '\\'`).join(' OR ')}${aliasMatch})`);
     values.push(...columns.map(() => `%${escapeLike(normalize(query))}%`));
+    if (aliasMatch) values.push(`%${escapeLike(normalize(query))}%`);
   }
   if (script !== 'both') { filters.push('d.isArabic=?'); values.push(script === 'ar' ? 1 : 0); }
   if (countries.length) { filters.push(`d.countryCode IN (${countries.map(() => '?').join(',')})`); values.push(...countries); }
-  if (params.get('examples') === '1') filters.push("LENGTH(TRIM(COALESCE(d.example,'')))>0");
+  if (params.get('examples') === '1') filters.push("(LENGTH(TRIM(COALESCE(d.example,'')))>0 OR LENGTH(TRIM(COALESCE(d.arabicExample,'')))>0)");
   const cte = `WITH matches AS (
-    SELECT d.*, w.arabicWord, w.francoArabicWord, d.id AS definitionId,
+    SELECT d.*, w.arabicWord, w.francoArabicWord, d.id AS definitionId,${spellingColumns()},
       CASE WHEN d.isArabic=1 THEN w.arabicWord ELSE COALESCE(w.francoArabicWord,w.arabicWord) END AS word,
       (d.likeCount-d.dislikeCount) AS likeDislikeDifference,
       ROW_NUMBER() OVER(PARTITION BY w.id,d.isArabic ORDER BY (d.likeCount-d.dislikeCount) DESC,d.id) AS ranking
@@ -35,7 +37,7 @@ export function exploreQuery(params: URLSearchParams) {
   const order = sort === 'newest' ? 'm.AddedTimestamp DESC,m.definitionId DESC' : sort === 'az' ? 'm.word COLLATE NOCASE,m.definitionId' : 'm.likeDislikeDifference DESC,m.definitionId';
   const countSql = `${cte} SELECT COUNT(*) AS total FROM matches WHERE ranking=1`;
   const resultsSql = `${cte} SELECT m.wordId,m.definitionId,m.word,m.arabicWord,m.francoArabicWord,
-    m.definition,m.example,m.isArabic,m.countryCode,m.likeCount,m.dislikeCount,m.likeDislikeDifference,
+    m.definition,m.example,m.arabicExample,m.arabicSpellings,m.francoSpellings,m.isArabic,m.countryCode,m.likeCount,m.dislikeCount,m.likeDislikeDifference,
     EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=m.definitionId AND r.userId=? AND r.liked=1) AS isLiked,
     EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=m.definitionId AND r.userId=? AND r.liked=0) AS isDisliked,
     EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=m.definitionId AND r.userId=?) AS isReported

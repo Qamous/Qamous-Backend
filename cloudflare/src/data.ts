@@ -6,7 +6,15 @@ export interface UserRow extends Row {
 }
 export interface DictionaryRow extends Row {
   id: number; wordId: number; userId: number; arabicWord: string; francoArabicWord: string | null;
-  definition: string; example: string | null; isArabic: number; countryCode: string | null;
+  definition: string; example: string | null; arabicExample: string | null; isArabic: number; countryCode: string | null;
+}
+export const spellingColumns = (word = 'w') => `
+ (SELECT json_group_array(spelling) FROM (SELECT spelling FROM word_spellings WHERE wordId=${word}.id AND script='ar' ORDER BY id)) AS arabicSpellings,
+ (SELECT json_group_array(spelling) FROM (SELECT spelling FROM word_spellings WHERE wordId=${word}.id AND script='franco' ORDER BY id)) AS francoSpellings`;
+export function withSpellings(row: Row): Row {
+  const { submissionId, ...visible } = row;
+  const parse = (value: unknown) => typeof value === 'string' ? JSON.parse(value) as string[] : Array.isArray(value) ? value : [];
+  return { ...visible, arabicSpellings: parse(row.arabicSpellings), francoSpellings: parse(row.francoSpellings) };
 }
 export const nowSql = () => new Date().toISOString().replace('T',' ').replace('Z','');
 export const normalize = (s:string) => s.normalize('NFKD').replace(/\p{M}/gu,'').replace(/ـ/g,'').toLocaleLowerCase('en');
@@ -34,10 +42,10 @@ export const requireUser = (user:UserRow|null) => {if(!user) throw new ApiError(
 
 export const rankedSql = (filter:string, pagination=false) => `
 WITH RankedDefinitions AS (
- SELECT d.*,w.id AS wordId,w.arabicWord,w.francoArabicWord,w.reportCount AS wordReportCount,
+ SELECT d.*,w.id AS wordId,w.arabicWord,w.francoArabicWord,w.reportCount AS wordReportCount,${spellingColumns()},
  d.id AS definitionId,d.reportCount AS definitionReportCount,
  (d.likeCount-d.dislikeCount) AS likeDislikeDifference,
- CASE WHEN d.isArabic=1 THEN w.arabicWord ELSE w.francoArabicWord END AS word,
+ CASE WHEN d.isArabic=1 THEN w.arabicWord ELSE COALESCE(w.francoArabicWord,w.arabicWord) END AS word,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=1) AS isLiked,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=0) AS isDisliked,
  EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=d.id AND r.userId=?) AS isReported,
@@ -46,15 +54,15 @@ WITH RankedDefinitions AS (
  WHERE w.reportCount<=5 AND d.reportCount<=5 ${filter}
 )
 SELECT wordId,definitionId,definition,likeCount,dislikeCount,likeDislikeDifference,isArabic,countryCode,word,
- wordReportCount,definitionReportCount,isLiked,isDisliked,isReported,example,arabicWord,francoArabicWord
+ wordReportCount,definitionReportCount,isLiked,isDisliked,isReported,example,arabicExample,arabicWord,francoArabicWord,arabicSpellings,francoSpellings
 FROM RankedDefinitions WHERE ranking=1 ORDER BY likeDislikeDifference DESC,definitionId ${pagination?'LIMIT ? OFFSET ?':''}`;
 
 export function withWord(row:Row) {
-  const {arabicWord,francoArabicWord,wordCreatedAt,wordUserId,wordReportCount,...definition}=row;
+  const {arabicWord,francoArabicWord,wordCreatedAt,wordUserId,wordReportCount,...definition}=withSpellings(row);
   delete definition.searchText;
   return {...definition,isArabic:!!definition.isArabic,isLiked:!!row.isLiked,isDisliked:!!row.isDisliked,isReported:!!row.isReported,word:{id:row.wordId,userId:wordUserId,arabicWord,francoArabicWord,createdAt:wordCreatedAt,reportCount:wordReportCount}};
 }
-export const joinWord = 'SELECT d.*,w.arabicWord,w.francoArabicWord,w.createdAt AS wordCreatedAt,w.userId AS wordUserId,w.reportCount AS wordReportCount FROM definitions d JOIN words w ON w.id=d.wordId';
+export const joinWord = `SELECT d.*,w.arabicWord,w.francoArabicWord,w.createdAt AS wordCreatedAt,w.userId AS wordUserId,w.reportCount AS wordReportCount,${spellingColumns()} FROM definitions d JOIN words w ON w.id=d.wordId`;
 export const personalJoinWord=joinWord.replace(' FROM definitions d',`,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=1) AS isLiked,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=0) AS isDisliked,
