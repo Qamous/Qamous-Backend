@@ -12,15 +12,15 @@ function fixture() {
   }
   // The deployment's public view can hide imports beyond the base report rules.
   db.exec(`INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES(1,'Test','','test@example.invalid','tester','2026-01-01');
-    INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt) VALUES(1,1,'أ','a','2026-01-01'),(2,1,'ب','b','2026-01-01'),(3,1,'ج','c','2026-01-01');
+    INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt) VALUES(1,1,'أ','a','2026-01-01'),(2,1,'ب','b','2026-01-01'),(3,1,'ج','c','2026-01-01'),(4,1,'سكباج','ssekbaaj','2026-01-01');
     INSERT INTO definitions(id,wordId,userId,definition,isArabic,likeCount,dislikeCount,reportCount) VALUES
       (1,1,1,'First',0,10,0,0),(2,1,1,'Another meaning',0,1,0,0),
-      (3,1,1,'Arabic',1,0,0,0),(4,2,1,'Second',0,0,0,0),(5,3,1,'Reported',0,50,0,6);
+      (3,1,1,'Arabic',1,0,0,0),(4,2,1,'Second',0,0,0,0),(5,3,1,'Reported',0,50,0,6),(6,4,1,'تعريف عربي فقط',1,0,0,0);
     INSERT INTO "definition-likes-dislikes"(definitionId,userId,liked) VALUES(4,1,0);`);
   return db;
 }
-function hydrate(db, ids, user = 0) {
-  const query = exploreQuery(new URLSearchParams({ ids }));
+function hydrate(db, ids, user = 0, script = 'both') {
+  const query = exploreQuery(new URLSearchParams({ ids, script }));
   return db.prepare(query.resultsSql).all(...query.values,user,user,user,query.limit,0);
 }
 
@@ -46,10 +46,12 @@ test('weighted permutation covers every candidate once and modestly favors appro
   assert.deepEqual(shuffledFeed([],random),[]);
   assert.deepEqual(shuffledFeed(candidates,()=>0),[1,2]);
 });
-test('snapshot selects one public card per word in the requested script, including unvoted cards', () => {
+test('discovery selects only definitions in the requested language, regardless of Franco or Arabic spelling', () => {
   const db=fixture();
   assert.deepEqual(db.prepare(feedCandidatesSql).all(feedScript('franco')).map(row=>row.definitionId),[1,4]);
-  assert.deepEqual(db.prepare(feedCandidatesSql).all(feedScript('ar')).map(row=>row.definitionId),[3,4]);
+  assert.deepEqual(db.prepare(feedCandidatesSql).all(feedScript('ar')).map(row=>row.definitionId),[3,6]);
+  db.exec('UPDATE words SET francoArabicWord=NULL WHERE id=2');
+  assert.deepEqual(db.prepare(feedCandidatesSql).all(0).map(row=>row.definitionId),[1,4]);
   db.exec('UPDATE words SET reportCount=6 WHERE id=2');
   assert.deepEqual(db.prepare(feedCandidatesSql).all(0).map(row=>row.definitionId),[1]);
   if(feedCandidatesSql.includes('public_definitions')) {
@@ -74,4 +76,15 @@ test('feed parameters reject invalid IDs, excessive requests and scripts', () =>
     assert.throws(()=>exploreQuery(new URLSearchParams({ids})),{status:400});
   }
   for (const script of [undefined,'both','en',"' OR 1=1"]) assert.throws(()=>feedScript(script),{status:400});
+  assert.throws(()=>exploreQuery(new URLSearchParams({ids:'1',script:'invalid'})),{status:400});
+});
+
+test('hydration filters a stale mixed-language snapshot without changing order or pagination totals',()=>{
+ const db=fixture();
+ try {
+  assert.deepEqual(hydrate(db,'6,4,3,1',0,'franco').map(row=>row.definitionId),[4,1]);
+  assert.deepEqual(hydrate(db,'6,4,3,1',0,'ar').map(row=>row.definitionId),[6,3]);
+  const query=exploreQuery(new URLSearchParams({ids:'6,4,3,1',script:'ar'}));
+  assert.equal(db.prepare(query.countSql).get(...query.values).total,2);
+ } finally {db.close();}
 });

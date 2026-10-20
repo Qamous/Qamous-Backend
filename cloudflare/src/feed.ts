@@ -14,11 +14,11 @@ export function shuffledFeed(rows: Candidate[], random = Math.random): number[] 
   })).sort((a, b) => a.key - b.key || a.id - b.id).map(row => row.id);
 }
 
-// Reuse the dictionary's public source and moderation rules. The subquery is
-// flattened by SQLite, so unused card text/spelling columns are not fetched.
+// Discovery follows definition language, independently of the headword's
+// script or Franco spelling. Cross-language fallback belongs to search/details.
 export const feedCandidatesSql = `WITH requested(isArabic) AS (VALUES (?)) SELECT d.id AS definitionId,d.likeCount,d.dislikeCount
  FROM dictionary_cards c JOIN public_definitions d ON d.id=c.definitionId
- JOIN words w ON w.id=d.wordId CROSS JOIN requested r WHERE (c.isArabic=r.isArabic OR NOT EXISTS(SELECT 1 FROM dictionary_cards preferred WHERE preferred.canonicalArabic=c.canonicalArabic AND preferred.isArabic=r.isArabic)) AND d.reportCount<=5 AND w.reportCount<=5`;
+ JOIN words w ON w.id=d.wordId CROSS JOIN requested r WHERE c.isArabic=r.isArabic AND d.reportCount<=5 AND w.reportCount<=5`;
 
 export function feedScript(value: string | undefined): number {
   if (value !== 'ar' && value !== 'franco') throw new ApiError(400, 'Invalid feed script');
@@ -28,6 +28,8 @@ export function feedScript(value: string | undefined): number {
 // Hydrate an immutable slice through /word/explore so its existing public
 // serialization (including source credits) and personal reaction flags apply.
 export function feedItemsQuery(params: URLSearchParams) {
+  const script = params.get('script') || 'both';
+  if (!['ar','franco','both'].includes(script)) throw new ApiError(400, 'Invalid feed script');
   const raw = params.get('ids') || '';
   if (!/^\d+(,\d+)*$/.test(raw) || raw.length > 850) throw new ApiError(400, 'Invalid feed IDs');
   const values = raw.split(',').map(Number);
@@ -35,7 +37,7 @@ export function feedItemsQuery(params: URLSearchParams) {
     throw new ApiError(400, 'Invalid feed IDs');
   }
   const requested = `WITH requested(id,position) AS (VALUES ${values.map((_, i) => `(?,${i})`).join(',')})`;
-  const from = `FROM (${joinWord}) d JOIN requested r ON r.id=d.id WHERE d.reportCount<=5 AND d.wordReportCount<=5`;
+  const from = `FROM (${joinWord}) d JOIN requested r ON r.id=d.id WHERE d.reportCount<=5 AND d.wordReportCount<=5${script==='both'?'':` AND d.isArabic=${script==='ar'?1:0}`}`;
   return {
     countSql: `${requested} SELECT COUNT(*) AS total ${from}`,
     resultsSql: `${requested} SELECT d.*,d.id AS definitionId,

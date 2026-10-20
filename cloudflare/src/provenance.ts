@@ -52,6 +52,7 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
         'JOIN import_pronunciations n ON n.recordKey=r.recordKey WHERE p.definitionId IN (' + placeholders +
         ") AND r.status IN ('accepted','duplicate') ORDER BY p.definitionId,r.sourceId,r.sourceEntryId,n.scheme,n.value").bind(...part).all<Row>(),
       db.prepare('SELECT d.id AS definitionId,d.example,d.arabicExample,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.exampleAlignment,s.dialect,s.arabicVariants,s.francoVariants,'+
+        '(SELECT json_group_array(c.isArabic) FROM dictionary_cards c WHERE c.canonicalArabic=w.canonicalArabic) AS definitionLanguages,'+
         '(SELECT MIN(id) FROM words ww WHERE ww.canonicalArabic=w.canonicalArabic AND ww.reportCount<=5) AS canonicalWordId,'+
         '(SELECT MIN(id) FROM definitions dd WHERE dd.submissionId=s.id) AS communityMeaningId '+
         'FROM definitions d JOIN words w ON w.id=d.wordId LEFT JOIN contribution_submissions s ON s.id=d.submissionId WHERE d.id IN ('+placeholders+')').bind(...part).all<Row>(),
@@ -139,6 +140,7 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
     }:{};
     return { ...row,
       ...(info?{arabicWord:arabic,francoArabicWord:franco||null,word:displayWord,canonicalWordId:info.canonicalWordId,meaningForms,
+        definitionLanguages:parse<number[]>(info.definitionLanguages,[]).map(value=>value===1?'ar':'en'),
         ...ownSpellings,
         countryCode:displayCountry,dialect:primary?.dialect||''}:{}),
       ...(formatted.changed?{definition:formatted.text,originalDefinition:row.definition,sourceDefinitionMarkers:formatted.sourceMarkers}:{}),

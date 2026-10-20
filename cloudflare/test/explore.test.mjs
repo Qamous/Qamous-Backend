@@ -19,6 +19,7 @@ function fixture() {
   word.run(1,'مَرْحَبَا','Marhaba','2026-01-01',normalize('مَرْحَبَا Marhaba'));
   word.run(2,'يلا','Yalla','2026-01-02',normalize('يلا Yalla'));
   word.run(3,'خاص','100%_literal','2026-01-03',normalize('خاص 100%_literal'));
+  word.run(4,'سكباج','OnlyArabic','2026-01-03',normalize('سكباج OnlyArabic'));
   const definition = db.prepare('INSERT INTO definitions(id,wordId,userId,countryCode,definition,example,isArabic,likeCount,reportCount,searchText,AddedTimestamp) VALUES (?,?,1,?,?,?,?,?,?,?,?)');
   for (const row of [
     [1,1,'EG','A greeting','Marhaba!',0,10,0,'2026-01-01'],
@@ -27,6 +28,7 @@ function fixture() {
     [4,2,'EG','Let us go','Yalla!',0,1,0,'2026-03-01'],
     [5,3,'LB','Literal punctuation','',0,0,0,'2026-01-01'],
     [6,2,'LB','Hidden definition','hidden',0,100,6,'2026-04-01'],
+    [7,4,'EG','تعريف عربي فقط','',1,0,0,'2026-01-03'],
   ]) {
     const [id,wordId,country,meaning,example,script,likes,reports,date]=row;
     definition.run(id,wordId,country,meaning,example,script,likes,reports,normalize(meaning),date);
@@ -86,4 +88,17 @@ test('rejects invalid and unbounded search options', () => {
   for (const query of ['page=0','page=1.5','limit=999','sort=drop','script=bad','scope=bad','country=EG%27','q='+'a'.repeat(201)]) {
     assert.throws(()=>exploreQuery(new URLSearchParams(query)),{status:400});
   }
+});
+
+test('browse and dialect filters keep definition languages strict, while typed searches can find untranslated words',()=>{
+ const db=fixture();
+ try {
+  assert.equal(search(db,'script=franco').total,3);
+  assert.ok(search(db,'script=franco').rows.every(row=>row.isArabic===0));
+  assert.equal(search(db,'script=ar').total,2);
+  assert.ok(search(db,'script=ar').rows.every(row=>row.isArabic===1));
+  assert.deepEqual(search(db,'country=EG&script=ar').rows.map(row=>row.definitionId),[3,7]);
+  assert.deepEqual(search(db,'q=OnlyArabic&script=franco').rows.map(row=>[row.definitionId,row.isArabic]),[[7,1]]);
+  assert.deepEqual(search(db,'q=Yalla&script=ar').rows.map(row=>[row.definitionId,row.isArabic]),[[4,0]]);
+ } finally {db.close();}
 });

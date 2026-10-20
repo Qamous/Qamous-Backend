@@ -46,6 +46,7 @@ export function exploreQuery(params: URLSearchParams) {
     }
   }
   const preferred=script==='ar'?1:0;
+  if (!query && script!=='both') filters.push(`d.isArabic=${preferred}`);
   if (countries.length) { filters.push(`d.countryCode IN (${countries.map(() => '?').join(',')})`); values.push(...countries); }
   if (params.get('examples') === '1') filters.push("(LENGTH(TRIM(COALESCE(d.example,'')))>0 OR LENGTH(TRIM(COALESCE(d.arabicExample,'')))>0 OR EXISTS(SELECT 1 FROM definition_examples e WHERE e.definitionId=d.id AND e.language IN ('ar','ar-Latn') AND e.kind='usage'))");
   const cte = `WITH matches AS (
@@ -64,8 +65,8 @@ export function exploreQuery(params: URLSearchParams) {
     EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=m.definitionId AND r.userId=?) AS isReported
     FROM matches m WHERE ranking=1 ORDER BY ${order} LIMIT ? OFFSET ?`;
   if (!query && !countries.length && params.get('examples') !== '1') {
-    const scriptWhere = script === 'both' ? '' : `WHERE c.isArabic=${preferred} OR NOT EXISTS(SELECT 1 FROM dictionary_cards preferred WHERE preferred.canonicalArabic=c.canonicalArabic AND preferred.isArabic=${preferred})`;
-    countSql = 'SELECT SUM(total) AS total FROM dictionary_card_totals WHERE '+(script==='both'?'isArabic IN (0,1)':'isArabic=2');
+    const scriptWhere = script === 'both' ? '' : `WHERE c.isArabic=${preferred}`;
+    countSql = 'SELECT SUM(total) AS total FROM dictionary_card_totals WHERE '+(script==='both'?'isArabic IN (0,1)':`isArabic=${preferred}`);
     const cardOrder = sort === 'newest' ? 'c.AddedTimestamp DESC,c.definitionId DESC' : sort === 'az' ? 'c.sortWord COLLATE NOCASE,c.definitionId' : 'c.score DESC,c.definitionId';
     resultsSql = `SELECT d.*,d.id AS definitionId,w.arabicWord,w.francoArabicWord,${spellingColumns()},c.sortWord AS word,c.score AS likeDislikeDifference,
       EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=1) AS isLiked,

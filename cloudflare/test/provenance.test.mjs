@@ -39,6 +39,7 @@ test('cards get original credit, linked license, importer disclosure, and labele
     assert.equal(result[0].sourceCredits[0].credit,'Research authors');
     assert.equal(result[0].sourceCredits[0].importer.username,'qalam01');
     assert.equal(result[0].sourceCredits[0].transliteration,'kitāb');
+    assert.deepEqual(result[0].definitionLanguages,['en']);
     assert.deepEqual(result[0].sourceExamples.map(e=>e.language),['ar','en','ar-Latn']);
     assert.equal(result[0].sourceExamples[2].generated,true);
     assert.ok(result[0].sourceExamples.every(e=>e.groupId==='1:0'));
@@ -96,6 +97,18 @@ test('imported spellings follow the linked meaning and never borrow another dial
   assert.deepEqual(rows[2].francoSpellings,[]);
   assert.deepEqual(rows[1].francoSpellings,['unrelated']);
   assert.equal(sql.prepare('SELECT franco FROM import_records WHERE recordKey=2').get().franco,'unrelated');
+ } finally {sql.close();}
+});
+
+test('available definition languages describe the entire canonical word rather than just the matching search row',async()=>{
+ const {sql,db}=fixture();
+ try {
+  sql.exec("INSERT INTO words(id,userId,arabicWord,createdAt) VALUES(2,1,'كِتاب','2026-10-20');INSERT INTO definitions(id,wordId,userId,definition,isArabic) VALUES(3,2,1,'تعريف بالعربية',1);");
+  const [row]=await attachProvenance(db,[{definitionId:1}]);
+  assert.deepEqual([...row.definitionLanguages].sort(),['ar','en']);
+  sql.exec("UPDATE definitions SET displayLanguage='hidden' WHERE id=3;");
+  const [hidden]=await attachProvenance(db,[{definitionId:1}]);
+  assert.deepEqual(hidden.definitionLanguages,['en']);
  } finally {sql.close();}
 });
 
