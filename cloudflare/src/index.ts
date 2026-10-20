@@ -221,9 +221,9 @@ app.get('/word/search/:filter',async c=>{
 });
 app.get('/word/suggestions',async c=>{
   const q=text(c.req.query('q'),'q',200),like='%'+escapeLike(normalize(q))+'%';
-  const rows=await c.env.DB.prepare(`SELECT w.id,w.arabicWord,w.francoArabicWord,${spellingColumns()} FROM words w
+  const rows=await c.env.DB.prepare(`SELECT MIN(w.id) AS id,w.canonicalArabic AS arabicWord,w.francoArabicWord,${spellingColumns()} FROM words w
     WHERE w.reportCount<=5 AND EXISTS(SELECT 1 FROM public_definitions d WHERE d.wordId=w.id AND d.reportCount<=5)
-    AND (w.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\')) ORDER BY w.arabicWord LIMIT 10`).bind(like,like).all();
+    AND (w.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\')) GROUP BY w.canonicalArabic ORDER BY w.canonicalArabic LIMIT 10`).bind(like,like).all();
   return c.json(rows.results.map(withSpellings));
 });
 app.post('/contributions',async c=>{
@@ -235,8 +235,9 @@ app.post('/contributions',async c=>{
 });
 app.get('/word/:id/seo',async c=>{
   const id=positiveId(c.req.param('id'));
-  const rows=(await c.env.DB.prepare(rankedSql('AND d.wordId=? AND (d.reportCount+w.reportCount)<5')).bind(0,0,0,id).all()).results;
-  return c.json(await attachProvenance(c.env.DB,rows.map(withWord)));
+  const rows=(await c.env.DB.prepare(rankedSql('AND w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?) AND (d.reportCount+w.reportCount)<5')).bind(0,0,0,id).all()).results;
+  const attached=await attachProvenance(c.env.DB,rows.map(withWord));
+  return c.json(attached.map(row=>({...row,word:{...row.word as Row,id}})));
 });
 app.get('/word/:id',async c=>{
   const row=await c.env.DB.prepare(`SELECT w.*,${spellingColumns()} FROM words w WHERE w.id=?`).bind(positiveId(c.req.param('id'))).first();
@@ -277,7 +278,7 @@ app.get('/definitions/random-matching',async c=>{
   return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql('AND d.wordId=?')).bind(user,user,user,word.wordId).all()).results.map(withSpellings)));
 });
 app.get('/definitions/user/:id',async c=>{const user=owner(c,positiveId(c.req.param('id'))).id;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE d.userId=? ORDER BY d.id').bind(user,user,user,user).all()).results.map(withWord)));});
-app.get('/definitions/word/:id',async c=>{const user=c.get('user')?.id||0;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE d.wordId=? AND (d.reportCount+w.reportCount)<5 ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord)));});
+app.get('/definitions/word/:id',async c=>{const user=c.get('user')?.id||0;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?) AND (d.reportCount+w.reportCount)<5 ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord)));});
 app.get('/definitions/:id/country',async c=>{
   const row=await c.env.DB.prepare('SELECT c.* FROM countries c JOIN public_definitions d ON d.countryCode=c.countryCode WHERE d.id=?').bind(positiveId(c.req.param('id'))).first();
   return c.json(row);

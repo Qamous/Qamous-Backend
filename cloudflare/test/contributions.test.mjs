@@ -4,10 +4,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { parseContribution, saveContribution } from '../src/contributions.ts';
 import { exploreQuery } from '../src/explore.ts';
+import {attachProvenance} from '../src/provenance.ts';
+import {stripTashkil,countryForDialect} from '../src/arabic-model.mjs';
 
 function fixture() {
   const sql = new DatabaseSync(':memory:');
-  for (const name of ['0001_initial.sql','0002_reaction_accounting.sql','0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql']) sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  for (const name of ['0001_initial.sql','0002_reaction_accounting.sql','0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql']) sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   sql.exec(`INSERT INTO countries VALUES('EG','Egypt');
     INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES(1,'A','','a@example.invalid','author','2026-01-01'),(2,'B','','b@example.invalid','reader','2026-01-01');`);
   const db = {
@@ -80,4 +82,35 @@ test('adds meanings to an existing word, and deleting a meaning cannot make a re
   sql.prepare('DELETE FROM definitions WHERE id=?').run(added.definitionIds[0]);
   assert.deepEqual((await saveContribution(db,2,extra,'extra-hash')).definitionIds,[]);
   assert.equal(sql.prepare('SELECT points FROM users WHERE id=2').get().points,0);sql.close();
+});
+
+test('vowelled and unvowelled phrases share a word while each meaning retains its own forms and English example',async()=>{
+ const {sql,db}=fixture();
+ const first=await saveContribution(db,1,draft({arabicWord:'عَلَم',arabicForm:null,francoArabicWord:'3alam',englishDefinition:'flag',arabicDefinition:'راية',englishExample:'Raise the flag.',transliteration:'ʕalam',ipa:'/ʕalam/'}),'flag');
+ const second=await saveContribution(db,2,draft({requestId:'knowledge-request-123456',arabicWord:'علم',arabicForm:'عِلْم',francoArabicWord:'3ilm',arabicDefinition:null,englishDefinition:'knowledge'}),'knowledge');
+ assert.equal(first.wordId,second.wordId);
+ assert.equal(sql.prepare('SELECT arabicWord FROM words').get().arabicWord,'علم');
+ const rows=await attachProvenance(db,sql.prepare('SELECT id,wordId,definition,isArabic FROM definitions ORDER BY id').all());
+ assert.equal(rows[0].meaningForms[0].meaningId,rows[1].meaningForms[0].meaningId);
+ assert.notEqual(rows[0].meaningForms[0].meaningId,rows[2].meaningForms[0].meaningId);
+ assert.equal(rows[0].francoArabicWord,'3alam');assert.equal(rows[2].francoArabicWord,'3ilm');
+ assert.equal(rows[0].sourcePronunciations.find(p=>p.scheme==='Arabic vocalization').value,'عَلَم');
+ assert.equal(rows[2].sourcePronunciations.find(p=>p.scheme==='Arabic vocalization').value,'عِلْم');
+ assert.equal(rows[0].sourceExamples[0].language,'en');
+ assert.equal(sql.prepare('SELECT points FROM users WHERE id=2').get().points,1);
+ await assert.rejects(saveContribution(db,2,draft({requestId:'wrong-reading-12345678',wordId:first.wordId,arabicForm:'كِتاب'}),'wrong'),/selected word/);
+ assert.equal(stripTashkil('أَكَلَ'),'أكل');assert.notEqual(stripTashkil('أكل'),stripTashkil('اكل'));
+ assert.equal(countryForDialect('قاهري'),'EG');assert.equal(countryForDialect('Omani Arabic'),'OM');assert.equal(countryForDialect('Gulf Arabic'),null);assert.equal(countryForDialect('Bahrani Arabic'),null);
+ sql.close();
+});
+
+test('grouped cards survive voting, hiding and deletion of a vowelled variant without moving reactions',()=>{
+ const {sql}=fixture();
+ sql.exec("INSERT INTO words(id,userId,arabicWord,createdAt) VALUES(10,1,'علم','2026-10-20'),(11,1,'عَلَم','2026-10-20');INSERT INTO definitions(id,wordId,userId,definition,isArabic) VALUES(10,10,1,'knowledge',0),(11,11,1,'flag',0);INSERT INTO \"definition-likes-dislikes\"(definitionId,userId,liked) VALUES(11,2,1);");
+ assert.equal(sql.prepare('SELECT definitionId FROM dictionary_cards').get().definitionId,11);
+ sql.exec('DELETE FROM definitions WHERE wordId=11;DELETE FROM words WHERE id=11');
+ assert.equal(sql.prepare('SELECT definitionId FROM dictionary_cards').get().definitionId,10);
+ assert.equal(sql.prepare('SELECT total FROM dictionary_card_totals WHERE isArabic=2').get().total,1);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM "definition-likes-dislikes"').get().n,0);
+ assert.deepEqual(sql.prepare('PRAGMA foreign_key_check').all(),[]);sql.close();
 });

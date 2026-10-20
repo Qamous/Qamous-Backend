@@ -18,6 +18,7 @@ function fixture() {
     "INSERT INTO import_records VALUES(1,'maknuune','sense1','https://example.org/entry',2,1,X'01','accepted','[]',1,'كتاب','','kitāb','Palestinian','','A book','{}',X'01',CURRENT_TIMESTAMP);" +
     "INSERT INTO import_change_templates VALUES(1,'[\"Extracted; text preserved.\"]');INSERT INTO definition_provenance VALUES(1,1,'en',1);" +
     "INSERT INTO definition_examples(definitionId,recordKey,text,language,script) VALUES(1,1,'A book.','en','Latin'),(1,1,'كتاب','ar','Arabic');");
+  for(const name of ['0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql'])sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   const calls = [];
   const db = { prepare(query) {
     const statement = args => ({
@@ -33,7 +34,7 @@ test('cards get original credit, linked license, importer disclosure, and labele
   const {sql,db,calls}=fixture();
   try {
     const result=await attachProvenance(db,[{definitionId:1},{definitionId:2}]);
-    assert.equal(calls.length,3);
+    assert.equal(calls.length,4);
     assert.equal(result[0].sourceCredits[0].credit,'Research authors');
     assert.equal(result[0].sourceCredits[0].importer.username,'qalam01');
     assert.equal(result[0].sourceCredits[0].transliteration,'kitāb');
@@ -48,7 +49,7 @@ test('pronunciations follow the linked meaning and source record, never every me
   const {sql,db}=fixture();
   try {
     sql.exec("INSERT INTO import_pronunciations VALUES(1,'translit','kitāb','ar','transcription'),(1,'CAPHI++','k i t aa b','ar','transcription');" +
-      "INSERT INTO import_records SELECT 2,sourceId,'sense2',sourceUrl,importerUserId,batchId,X'02','accepted',reasons,wordId,arabic,franco,transliteration,dialect,definitionAr,definitionEn,originalMetadata,X'02',importedAt FROM import_records WHERE recordKey=1;" +
+      "INSERT INTO import_records SELECT 2,sourceId,'sense2',sourceUrl,importerUserId,batchId,X'02','accepted',reasons,wordId,arabic,franco,transliteration,dialect,definitionAr,definitionEn,originalMetadata,X'02',importedAt,displayFranco FROM import_records WHERE recordKey=1;" +
       "INSERT INTO definitions(id,wordId,userId,definition,isArabic) VALUES(3,1,2,'Another meaning',0);" +
       "INSERT INTO definition_provenance VALUES(3,2,'en',1);INSERT INTO import_pronunciations VALUES(2,'phonemic','/different/','ar','transcription');");
     const rows=await attachProvenance(db,[{definitionId:1},{definitionId:2},{definitionId:3}]);
@@ -84,10 +85,10 @@ test('multiple-license source notices still link directly to the applicable CC l
   assert.equal(licenseLink('Arabic CC BY-SA 3.0 + PWN notice','https://omwn.org/omw1.html'),'https://creativecommons.org/licenses/by-sa/3.0/');
   assert.equal(licenseLink('Unverified','https://example.org'),'https://example.org');
 });
-test('public import profiles disclose managed ownership without private account fields',()=>{
+test('public collection profiles omit private account controls',()=>{
   const user=publicUser({id:2,firstName:'qalam01',username:'qalam01',accountKind:'import',email:'qalam01@imports.invalid'});
-  assert.equal(user.loginEnabled,false);
-  assert.match(user.disclosure,/import alias/);
+  assert.equal(user.loginEnabled,undefined);
+  assert.equal(user.accountKind,undefined);
   assert.ok(!('email' in user));
 });
 test('GPL source exports include original notice, license, transcription and per-entry changes, excluding holds', async()=>{
@@ -95,8 +96,8 @@ test('GPL source exports include original notice, license, transcription and per
   try {
     sql.exec("INSERT INTO import_sources VALUES('aramorph','AraMorph','https://example.org','GPL-2.0-only','https://www.gnu.org/licenses/old-licenses/gpl-2.0.html','licensed','Tim Buckwalter','Copyright 2002 QAMUS LLC and Trustees of the University of Pennsylvania',1,'release','{}');" +
       "INSERT INTO import_license_documents VALUES('aramorph','COPYING.txt','GNU GENERAL PUBLIC LICENSE version 2');" +
-      "INSERT INTO import_records VALUES(2,'aramorph','kitAb_1','https://example.org/entry',2,1,X'02','accepted','[]',1,'كتاب','','kitAb','Modern Standard Arabic','','book','{\"changes\":\"Buckwalter decoded\"}',X'02',CURRENT_TIMESTAMP);" +
-      "INSERT INTO import_records VALUES(3,'aramorph','held','https://example.org/held',2,1,X'03','held','[]',NULL,'كلمة','','','Modern Standard Arabic','','held meaning','{}',X'03',CURRENT_TIMESTAMP);");
+      "INSERT INTO import_records VALUES(2,'aramorph','kitAb_1','https://example.org/entry',2,1,X'02','accepted','[]',1,'كتاب','','kitAb','Modern Standard Arabic','','book','{\"changes\":\"Buckwalter decoded\"}',X'02',CURRENT_TIMESTAMP,NULL);" +
+      "INSERT INTO import_records VALUES(3,'aramorph','held','https://example.org/held',2,1,X'03','held','[]',NULL,'كلمة','','','Modern Standard Arabic','','held meaning','{}',X'03',CURRENT_TIMESTAMP,NULL);");
     sql.exec("INSERT INTO definitions(id,wordId,userId,definition,isArabic) VALUES(3,1,2,'book;volume',0);INSERT INTO definition_provenance VALUES(3,2,'en',1);");
     const app=new Hono();
     registerProvenanceRoutes(app);

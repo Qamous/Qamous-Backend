@@ -16,11 +16,9 @@ export function shuffledFeed(rows: Candidate[], random = Math.random): number[] 
 
 // Reuse the dictionary's public source and moderation rules. The subquery is
 // flattened by SQLite, so unused card text/spelling columns are not fetched.
-export const feedCandidatesSql = `WITH ranked AS (
-  SELECT d.id AS definitionId,d.likeCount,d.dislikeCount,
-    ROW_NUMBER() OVER(PARTITION BY d.wordId,d.isArabic ORDER BY d.likeCount-d.dislikeCount DESC,d.id) AS ranking
-  FROM (${joinWord}) d WHERE d.isArabic=? AND d.reportCount<=5 AND d.wordReportCount<=5
-) SELECT definitionId,likeCount,dislikeCount FROM ranked WHERE ranking=1`;
+export const feedCandidatesSql = `WITH requested(isArabic) AS (VALUES (?)) SELECT d.id AS definitionId,d.likeCount,d.dislikeCount
+ FROM dictionary_cards c JOIN public_definitions d ON d.id=c.definitionId
+ JOIN words w ON w.id=d.wordId CROSS JOIN requested r WHERE (c.isArabic=r.isArabic OR NOT EXISTS(SELECT 1 FROM dictionary_cards preferred WHERE preferred.canonicalArabic=c.canonicalArabic AND preferred.isArabic=r.isArabic)) AND d.reportCount<=5 AND w.reportCount<=5`;
 
 export function feedScript(value: string | undefined): number {
   if (value !== 'ar' && value !== 'franco') throw new ApiError(400, 'Invalid feed script');

@@ -7,7 +7,7 @@ import {formatImportedDefinition} from '../src/definition-display.mjs';
 await verifyFreePlan();
 const root=fileURLToPath(new URL('..',import.meta.url));
 // Only public names and short descriptions, never users, ownership or credentials.
-const sql=`SELECT w.id,w.arabicWord,w.francoArabicWord,
+const sql=`SELECT w.id,w.canonicalArabic AS arabicWord,w.francoArabicWord,
  COALESCE((SELECT d.definition FROM public_definitions d WHERE d.wordId=w.id AND d.isArabic=0 AND (d.reportCount+w.reportCount)<5 ORDER BY d.likeCount-d.dislikeCount DESC,d.id LIMIT 1),'') AS descriptionEn,
  COALESCE((SELECT d.definition FROM public_definitions d WHERE d.wordId=w.id AND d.isArabic=1 AND (d.reportCount+w.reportCount)<5 ORDER BY d.likeCount-d.dislikeCount DESC,d.id LIMIT 1),'') AS descriptionAr
  FROM words w WHERE EXISTS(SELECT 1 FROM public_definitions d WHERE d.wordId=w.id AND (d.reportCount+w.reportCount)<5) ORDER BY w.id LIMIT 250;

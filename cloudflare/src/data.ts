@@ -36,8 +36,7 @@ export function text(value:unknown, field:string, max=255, required=true):string
 }
 export function publicUser(user:UserRow, owner=false) {
   const visible:Row={id:Number(user.id),firstName:user.firstName,username:user.username,likesReceived:user.likesReceived,points:user.points,createdAt:user.createdAt};
-  visible.accountKind=user.accountKind||'member';
-  if(user.accountKind==='import') Object.assign(visible,{disclosure:'Qamous-managed import alias; not an independent member or original author.',loginEnabled:false});
+  if(owner)visible.accountKind=user.accountKind||'member';
   if(owner) Object.assign(visible,{lastName:user.lastName,email:user.email,dateOfBirth:user.dateOfBirth,countryCountryCode:user.countryCountryCode});
   return visible;
 }
@@ -52,7 +51,7 @@ WITH RankedDefinitions AS (
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=1) AS isLiked,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=0) AS isDisliked,
  EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=d.id AND r.userId=?) AS isReported,
- ROW_NUMBER() OVER(PARTITION BY w.id,d.isArabic ORDER BY (d.likeCount-d.dislikeCount) DESC,d.id) AS ranking
+ ROW_NUMBER() OVER(PARTITION BY w.canonicalArabic,d.isArabic ORDER BY (d.likeCount-d.dislikeCount) DESC,d.id) AS ranking
  FROM public_definitions d JOIN words w ON w.id=d.wordId
  WHERE w.reportCount<=5 AND d.reportCount<=5 ${filter}
 )

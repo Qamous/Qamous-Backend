@@ -7,13 +7,10 @@ import { exploreQuery } from '../src/explore.ts';
 
 function fixture() {
   const db = new DatabaseSync(':memory:');
-  for (const migration of ['0001_initial.sql', '0003_contributions.sql']) {
+  for (const migration of ['0001_initial.sql', '0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql']) {
     db.exec(readFileSync(new URL('../migrations/' + migration, import.meta.url), 'utf8'));
   }
   // The deployment's public view can hide imports beyond the base report rules.
-  if (feedCandidatesSql.includes('public_definitions')) {
-    db.exec("ALTER TABLE definitions ADD COLUMN displayLanguage TEXT DEFAULT 'legacy'; CREATE VIEW public_definitions AS SELECT * FROM definitions WHERE displayLanguage!='hidden';");
-  }
   db.exec(`INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES(1,'Test','','test@example.invalid','tester','2026-01-01');
     INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt) VALUES(1,1,'أ','a','2026-01-01'),(2,1,'ب','b','2026-01-01'),(3,1,'ج','c','2026-01-01');
     INSERT INTO definitions(id,wordId,userId,definition,isArabic,likeCount,dislikeCount,reportCount) VALUES
@@ -52,7 +49,7 @@ test('weighted permutation covers every candidate once and modestly favors appro
 test('snapshot selects one public card per word in the requested script, including unvoted cards', () => {
   const db=fixture();
   assert.deepEqual(db.prepare(feedCandidatesSql).all(feedScript('franco')).map(row=>row.definitionId),[1,4]);
-  assert.deepEqual(db.prepare(feedCandidatesSql).all(feedScript('ar')).map(row=>row.definitionId),[3]);
+  assert.deepEqual(db.prepare(feedCandidatesSql).all(feedScript('ar')).map(row=>row.definitionId),[3,4]);
   db.exec('UPDATE words SET reportCount=6 WHERE id=2');
   assert.deepEqual(db.prepare(feedCandidatesSql).all(0).map(row=>row.definitionId),[1]);
   if(feedCandidatesSql.includes('public_definitions')) {
