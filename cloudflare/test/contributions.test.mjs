@@ -7,7 +7,7 @@ import { exploreQuery } from '../src/explore.ts';
 
 function fixture() {
   const sql = new DatabaseSync(':memory:');
-  for (const name of ['0001_initial.sql','0002_reaction_accounting.sql','0003_contributions.sql']) sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  for (const name of ['0001_initial.sql','0002_reaction_accounting.sql','0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql']) sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   sql.exec(`INSERT INTO countries VALUES('EG','Egypt');
     INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES(1,'A','','a@example.invalid','author','2026-01-01'),(2,'B','','b@example.invalid','reader','2026-01-01');`);
   const db = {

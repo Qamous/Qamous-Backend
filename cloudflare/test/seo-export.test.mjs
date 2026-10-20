@@ -11,6 +11,7 @@ test('SEO queries expose only public vocabulary and visible country memberships'
     db.exec(`CREATE TABLE words(id INTEGER,arabicWord TEXT,francoArabicWord TEXT,reportCount INTEGER,userId INTEGER);
       CREATE TABLE countries(countryCode TEXT,countryName TEXT);
       CREATE TABLE definitions(id INTEGER,wordId INTEGER,isArabic INTEGER,definition TEXT,reportCount INTEGER,likeCount INTEGER,dislikeCount INTEGER,countryCode TEXT);
+      CREATE VIEW public_definitions AS SELECT * FROM definitions;
       INSERT INTO countries VALUES('EG','Egypt'),('LB','Lebanon');
       INSERT INTO words VALUES(1,'كلمة','word',0,123),(2,'مخفية','hidden',2,456),(3,'محظورة','blocked',5,789);
       INSERT INTO definitions VALUES(1,1,0,'Public meaning',0,2,0,'EG'),(2,1,1,'معنى',0,1,0,'EG'),

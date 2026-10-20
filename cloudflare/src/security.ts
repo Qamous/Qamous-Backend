@@ -19,7 +19,7 @@ export async function loadSession(c:Context<AppContext>) {
   if(!result) return;
   const userId=JSON.parse(result.data).userId;
   const user=await c.env.DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<UserRow>();
-  if(!user) return;
+  if(!user||user.accountKind==='import') return;
   c.set('user',user);c.set('sessionKey',key);
   if(result.expires-Math.floor(Date.now()/1000)<540) {
     await c.env.DB.prepare('UPDATE sessions SET expires=? WHERE session_id=?').bind(Math.floor(Date.now()/1000)+600,key).run();

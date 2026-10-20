@@ -9,6 +9,8 @@ function fixture() {
   const db = new DatabaseSync(':memory:');
   db.exec(readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
   db.exec(readFileSync(new URL('../migrations/0003_contributions.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0004_import_provenance.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0005_dictionary_read_indexes.sql', import.meta.url), 'utf8'));
   db.exec(`INSERT INTO countries VALUES ('EG','Egypt'),('LB','Lebanon');
     INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES (1,'Test','User','test@example.invalid','tester','2026-01-01');`);
   const word = db.prepare('INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt,reportCount,searchText) VALUES (?,1,?,?,?,0,?)');
@@ -35,7 +37,7 @@ function search(db, query='', user=0) {
   const plan = exploreQuery(new URLSearchParams(query));
   return {
     total: db.prepare(plan.countSql).get(...plan.values).total,
-    rows: db.prepare(plan.resultsSql).all(...plan.values,user,user,user,plan.limit,(plan.page-1)*plan.limit),
+    rows: db.prepare(plan.resultsSql).all(...(plan.fastFeed?[user,user,user,...plan.values,plan.limit,(plan.page-1)*plan.limit]:[...plan.values,user,user,user,plan.limit,(plan.page-1)*plan.limit])),
   };
 }
 

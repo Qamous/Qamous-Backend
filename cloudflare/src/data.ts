@@ -2,6 +2,7 @@ export type Row = Record<string, unknown>;
 export interface UserRow extends Row {
   id: number; firstName: string; lastName: string; username: string; email: string;
   password: string; passwordVersion: string; createdAt: string; dateOfBirth: string | null;
+  accountKind?: 'member' | 'import';
   likesReceived: number; points: number; countryCountryCode: string | null;
 }
 export interface DictionaryRow extends Row {
@@ -35,6 +36,8 @@ export function text(value:unknown, field:string, max=255, required=true):string
 }
 export function publicUser(user:UserRow, owner=false) {
   const visible:Row={id:Number(user.id),firstName:user.firstName,username:user.username,likesReceived:user.likesReceived,points:user.points,createdAt:user.createdAt};
+  visible.accountKind=user.accountKind||'member';
+  if(user.accountKind==='import') Object.assign(visible,{disclosure:'Qamous-managed import alias; not an independent member or original author.',loginEnabled:false});
   if(owner) Object.assign(visible,{lastName:user.lastName,email:user.email,dateOfBirth:user.dateOfBirth,countryCountryCode:user.countryCountryCode});
   return visible;
 }
@@ -50,7 +53,7 @@ WITH RankedDefinitions AS (
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=0) AS isDisliked,
  EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=d.id AND r.userId=?) AS isReported,
  ROW_NUMBER() OVER(PARTITION BY w.id,d.isArabic ORDER BY (d.likeCount-d.dislikeCount) DESC,d.id) AS ranking
- FROM definitions d JOIN words w ON w.id=d.wordId
+ FROM public_definitions d JOIN words w ON w.id=d.wordId
  WHERE w.reportCount<=5 AND d.reportCount<=5 ${filter}
 )
 SELECT wordId,definitionId,definition,likeCount,dislikeCount,likeDislikeDifference,isArabic,countryCode,word,
@@ -62,9 +65,9 @@ export function withWord(row:Row) {
   delete definition.searchText;
   return {...definition,isArabic:!!definition.isArabic,isLiked:!!row.isLiked,isDisliked:!!row.isDisliked,isReported:!!row.isReported,word:{id:row.wordId,userId:wordUserId,arabicWord,francoArabicWord,createdAt:wordCreatedAt,reportCount:wordReportCount}};
 }
-export const joinWord = `SELECT d.*,w.arabicWord,w.francoArabicWord,w.createdAt AS wordCreatedAt,w.userId AS wordUserId,w.reportCount AS wordReportCount,${spellingColumns()} FROM definitions d JOIN words w ON w.id=d.wordId`;
-export const personalJoinWord=joinWord.replace(' FROM definitions d',`,
+export const joinWord = `SELECT d.*,w.arabicWord,w.francoArabicWord,w.createdAt AS wordCreatedAt,w.userId AS wordUserId,w.reportCount AS wordReportCount,${spellingColumns()} FROM public_definitions d JOIN words w ON w.id=d.wordId`;
+export const personalJoinWord=joinWord.replace(' FROM public_definitions d',`,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=1) AS isLiked,
  EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=d.id AND r.userId=? AND r.liked=0) AS isDisliked,
  EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=d.id AND r.userId=?) AS isReported
- FROM definitions d`);
+ FROM public_definitions d`);

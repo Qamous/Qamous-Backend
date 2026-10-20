@@ -9,6 +9,7 @@ import { validateWriteRequest, requireJson } from './request-policy';
 import { exploreQuery } from './explore';
 import { feedCandidatesSql, feedScript, shuffledFeed, type FeedCandidate } from './feed';
 import { parseContribution, saveContribution } from './contributions';
+import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
 export { QamousRuntime } from './runtime';
 
 const app=new Hono<AppContext>();
@@ -53,7 +54,7 @@ app.use('*',async(c,next)=>{
   validateWriteRequest(c.req.method,c.req.raw.headers,c.env.ALLOWED_ORIGINS.split(','));
   // Keep the deployed read API bounded per client, including workers.dev where
   // zone WAF rules do not run. This is not a claim of scraper-proof public data.
-  if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)) await checkRate(c,'read-api',120,60);
+  if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)&&!isImportPreview(c.req.url,c.env)) await checkRate(c,'read-api',120,60);
   await loadSession(c);await next();
 });
 app.onError((error,c)=>{
@@ -75,6 +76,7 @@ app.post('/auth/login',async c=>{
   const data=await body(c);const username=text(data.username,'username',80);const pass=typeof data.password==='string'?data.password:'';
   if(!pass||pass.length>200) throw new ApiError(401,'Invalid credentials');
   const user=await c.env.DB.prepare('SELECT * FROM users WHERE username=? COLLATE NOCASE').bind(username).first<UserRow>();
+  if(user?.accountKind==='import') throw new ApiError(401,'Invalid credentials');
   if(!user?.password||!await runtime(c.env,`password:${user.id}`).verifyPassword(pass,user.password,user.passwordVersion)) throw new ApiError(401,'Invalid credentials');
   if(user.passwordVersion==='legacy') {
     const upgraded=await runtime(c.env,`password:${user.id}`).hashPassword(pass);
@@ -157,7 +159,7 @@ app.post('/users/reset-password',async c=>{
   await checkRate(c,'password-reset',5,3600);const data=await body(c);const mail=email(data.email);
   const addressKey=await digest(mail);
   if(!await runtime(c.env,`rate:reset:${addressKey}`).allow('requests',3,3600)) throw new ApiError(429,'Please wait before requesting another password reset');
-  const user=await c.env.DB.prepare('SELECT id FROM users WHERE email=? COLLATE NOCASE').bind(mail).first<{id:number}>();
+  const user=await c.env.DB.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE AND accountKind='member'").bind(mail).first<{id:number}>();
   if(user) {
     if(!c.env.RESET_SECRET) throw new ApiError(503,'Password reset is temporarily unavailable');
     const raw=token(),key=await digest(raw+c.env.RESET_SECRET);
@@ -171,7 +173,7 @@ app.post('/users/reset-password/:token',async c=>{
   await checkRate(c,'use-password-reset',10,3600);const data=await body(c);const pass=password(data.newPassword);
   const key=await digest(text(c.req.param('token'),'token',128)+c.env.RESET_SECRET);
   const now=Math.floor(Date.now()/1000);
-  const reset=await c.env.DB.prepare('SELECT user_id FROM password_resets WHERE token_hash=? AND consumed=0 AND expires>?').bind(key,now).first<{user_id:number}>();
+  const reset=await c.env.DB.prepare("SELECT user_id FROM password_resets WHERE token_hash=? AND consumed=0 AND expires>? AND user_id IN (SELECT id FROM users WHERE accountKind='member')").bind(key,now).first<{user_id:number}>();
   if(!reset) throw new ApiError(400,'Invalid or expired token');
   const hashed=await runtime(c.env,`password:${reset.user_id}`).hashPassword(pass);
   const results=await c.env.DB.batch([
@@ -193,13 +195,14 @@ app.patch('/countries/:code',async c=>{admin(c);const data=await body(c);await c
 app.delete('/countries/:code',async c=>{admin(c);await c.env.DB.prepare('DELETE FROM countries WHERE countryCode=?').bind(c.req.param('code')).run();return c.json(deleted);});
 
 app.get('/word/explore',async c=>{
-  const {countSql,resultsSql,values,page,limit}=exploreQuery(new URL(c.req.url).searchParams);
+  const query=exploreQuery(new URL(c.req.url).searchParams);
+  const {countSql,resultsSql,values,page,limit}=query;
   const user=c.get('user')?.id||0;
   const [count,rows]=await c.env.DB.batch<Row>([
     c.env.DB.prepare(countSql).bind(...values),
-    c.env.DB.prepare(resultsSql).bind(...values,user,user,user,limit,(page-1)*limit),
+    c.env.DB.prepare(resultsSql).bind(...(query.fastFeed?[user,user,user,...values,limit,(page-1)*limit]:[...values,user,user,user,limit,(page-1)*limit])),
   ]);
-  return c.json({results:rows.results.map(withSpellings),total:Number(count.results[0]?.total||0),page,limit});
+  return c.json({results:await attachProvenance(c.env.DB,rows.results.map(withSpellings)),total:Number(count.results[0]?.total||0),page,limit});
 });
 app.get('/word/search/all',async c=>{admin(c);return c.json((await c.env.DB.prepare('SELECT id,userId,arabicWord,francoArabicWord,createdAt,reportCount FROM words ORDER BY id').all()).results);});
 app.get('/word/search/:filter',async c=>{
@@ -207,19 +210,19 @@ app.get('/word/search/:filter',async c=>{
   if(filter.startsWith('kwd=')) {
     const keyword=text(filter.slice(4),'keyword',200);
     const like='%'+escapeLike(normalize(keyword))+'%';
-    return c.json((await c.env.DB.prepare(rankedSql("AND (w.searchText LIKE ? ESCAPE '\\' OR d.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\'))")).bind(user,user,user,like,like,like).all()).results.map(withSpellings));
+    return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql("AND (w.searchText LIKE ? ESCAPE '\\' OR d.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\'))")).bind(user,user,user,like,like,like).all()).results.map(withSpellings)));
   }
   if(filter.startsWith('iso=')) {
     const code=filter.slice(4).toUpperCase();
     const rows=(await c.env.DB.prepare(rankedSql('AND d.countryCode=?')).bind(user,user,user,code).all()).results;
-    return c.json(rows.map(r=>({...withSpellings(r),isLiked:!!r.isLiked,isDisliked:!!r.isDisliked,isReported:!!r.isReported})));
+    return c.json(await attachProvenance(c.env.DB,rows.map(r=>({...withSpellings(r),isLiked:!!r.isLiked,isDisliked:!!r.isDisliked,isReported:!!r.isReported}))));
   }
   throw new ApiError(404,'Search route not found');
 });
 app.get('/word/suggestions',async c=>{
   const q=text(c.req.query('q'),'q',200),like='%'+escapeLike(normalize(q))+'%';
   const rows=await c.env.DB.prepare(`SELECT w.id,w.arabicWord,w.francoArabicWord,${spellingColumns()} FROM words w
-    WHERE w.reportCount<=5 AND EXISTS(SELECT 1 FROM definitions d WHERE d.wordId=w.id AND d.reportCount<=5)
+    WHERE w.reportCount<=5 AND EXISTS(SELECT 1 FROM public_definitions d WHERE d.wordId=w.id AND d.reportCount<=5)
     AND (w.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\')) ORDER BY w.arabicWord LIMIT 10`).bind(like,like).all();
   return c.json(rows.results.map(withSpellings));
 });
@@ -229,6 +232,11 @@ app.post('/contributions',async c=>{
   const {requestId,...payload}=input;
   const result=await saveContribution(c.env.DB,user.id,input,await digest(JSON.stringify(payload)));
   queueEmbedding(c);return c.json(result,201);
+});
+app.get('/word/:id/seo',async c=>{
+  const id=positiveId(c.req.param('id'));
+  const rows=(await c.env.DB.prepare(rankedSql('AND d.wordId=? AND (d.reportCount+w.reportCount)<5')).bind(0,0,0,id).all()).results;
+  return c.json(await attachProvenance(c.env.DB,rows.map(withWord)));
 });
 app.get('/word/:id',async c=>{
   const row=await c.env.DB.prepare(`SELECT w.*,${spellingColumns()} FROM words w WHERE w.id=?`).bind(positiveId(c.req.param('id'))).first();
@@ -260,22 +268,23 @@ app.get('/definitions/feed',async c=>{
 app.get('/definitions/most-liked',async c=>{
   const user=c.get('user')?.id||0,page=Math.max(1,Math.min(10000,Number(c.req.query('page'))||1)),limit=Math.max(1,Math.min(50,Number(c.req.query('limit'))||10));
   if(!Number.isInteger(page)||!Number.isInteger(limit)) throw new ApiError(400,'Invalid pagination');
-  return c.json((await c.env.DB.prepare(rankedSql('',true)).bind(user,user,user,limit,(page-1)*limit).all()).results.map(withSpellings));
+  const query=exploreQuery(new URLSearchParams({page:String(page),limit:String(limit)}));
+  return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(query.resultsSql).bind(user,user,user,limit,(page-1)*limit).all()).results.map(withSpellings)));
 });
 app.get('/definitions/random-matching',async c=>{
-  const word=await c.env.DB.prepare('SELECT wordId FROM definitions GROUP BY wordId HAVING SUM(isArabic=1)>0 AND SUM(isArabic=0)>0 ORDER BY random() LIMIT 1').first<{wordId:number}>();
+  const word=await c.env.DB.prepare('SELECT wordId FROM public_definitions GROUP BY wordId HAVING SUM(isArabic=1)>0 AND SUM(isArabic=0)>0 ORDER BY random() LIMIT 1').first<{wordId:number}>();
   if(!word) return c.json([]);const user=c.get('user')?.id||0;
-  return c.json((await c.env.DB.prepare(rankedSql('AND d.wordId=?')).bind(user,user,user,word.wordId).all()).results.map(withSpellings));
+  return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql('AND d.wordId=?')).bind(user,user,user,word.wordId).all()).results.map(withSpellings)));
 });
-app.get('/definitions/user/:id',async c=>{const user=owner(c,positiveId(c.req.param('id'))).id;return c.json((await c.env.DB.prepare(personalJoinWord+' WHERE d.userId=? ORDER BY d.id').bind(user,user,user,user).all()).results.map(withWord));});
-app.get('/definitions/word/:id',async c=>{const user=c.get('user')?.id||0;return c.json((await c.env.DB.prepare(personalJoinWord+' WHERE d.wordId=? AND (d.reportCount+w.reportCount)<5 ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord));});
+app.get('/definitions/user/:id',async c=>{const user=owner(c,positiveId(c.req.param('id'))).id;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE d.userId=? ORDER BY d.id').bind(user,user,user,user).all()).results.map(withWord)));});
+app.get('/definitions/word/:id',async c=>{const user=c.get('user')?.id||0;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE d.wordId=? AND (d.reportCount+w.reportCount)<5 ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord)));});
 app.get('/definitions/:id/country',async c=>{
-  const row=await c.env.DB.prepare('SELECT c.* FROM countries c JOIN definitions d ON d.countryCode=c.countryCode WHERE d.id=?').bind(positiveId(c.req.param('id'))).first();
+  const row=await c.env.DB.prepare('SELECT c.* FROM countries c JOIN public_definitions d ON d.countryCode=c.countryCode WHERE d.id=?').bind(positiveId(c.req.param('id'))).first();
   return c.json(row);
 });
 app.get('/definitions/:id',async c=>{
-  const row=await c.env.DB.prepare('SELECT * FROM definitions WHERE id=?').bind(positiveId(c.req.param('id'))).first();
-  if(!row) throw new ApiError(404,'Definition not found');return c.json(withoutSearch(row));
+  const row=await c.env.DB.prepare('SELECT * FROM public_definitions WHERE id=?').bind(positiveId(c.req.param('id'))).first();
+  if(!row) throw new ApiError(404,'Definition not found');return c.json((await attachProvenance(c.env.DB,[withoutSearch(row)]))[0]);
 });
 app.get('/definitions',async c=>{admin(c);return c.json((await c.env.DB.prepare('SELECT * FROM definitions ORDER BY id').all()).results.map(withoutSearch));});
 app.post('/definitions',async c=>{
@@ -371,5 +380,6 @@ app.post('/maintenance/embeddings',async c=>{admin(c);return c.json(await runtim
 app.post('/maintenance/mailer-check',async c=>{admin(c);const result=await runtime(c.env).verifyMailer();return c.json({configured:result.ok,diagnostic:result.ok?undefined:result});});
 app.post('/users/recalculate-points',c=>{admin(c);throw new ApiError(409,'Historical points are preserved; bulk recalculation is disabled');});
 app.post('/reactions/recalculate-all',c=>{admin(c);throw new ApiError(409,'Historical counters are preserved; bulk recalculation is disabled');});
+registerProvenanceRoutes(app);
 app.notFound(c=>c.json({message:'Route not found'},404));
 export default app;
