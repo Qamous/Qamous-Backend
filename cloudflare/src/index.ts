@@ -210,7 +210,7 @@ app.get('/word/search/:filter',async c=>{
   if(filter.startsWith('kwd=')) {
     const keyword=text(filter.slice(4),'keyword',200);
     const like='%'+escapeLike(normalize(keyword))+'%';
-    return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql("AND (w.searchText LIKE ? ESCAPE '\\' OR d.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\'))")).bind(user,user,user,like,like,like).all()).results.map(withSpellings)));
+    return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql("AND (w.searchText LIKE ? ESCAPE '\\' OR d.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\') OR d.submissionId IN (SELECT id FROM contribution_submissions WHERE francoForm LIKE ? ESCAPE '\\'))")).bind(user,user,user,like,like,like,like).all()).results.map(withSpellings)));
   }
   if(filter.startsWith('iso=')) {
     const code=filter.slice(4).toUpperCase();
@@ -223,7 +223,7 @@ app.get('/word/suggestions',async c=>{
   const q=text(c.req.query('q'),'q',200),like='%'+escapeLike(normalize(q))+'%';
   const rows=await c.env.DB.prepare(`SELECT MIN(w.id) AS id,w.canonicalArabic AS arabicWord,w.francoArabicWord,${spellingColumns()} FROM words w
     WHERE w.reportCount<=5 AND EXISTS(SELECT 1 FROM public_definitions d WHERE d.wordId=w.id AND d.reportCount<=5)
-    AND (w.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\')) GROUP BY w.canonicalArabic ORDER BY w.canonicalArabic LIMIT 10`).bind(like,like).all();
+    AND (w.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\') OR EXISTS(SELECT 1 FROM contribution_submissions s WHERE s.wordId=w.id AND s.francoForm LIKE ? ESCAPE '\\')) GROUP BY w.canonicalArabic ORDER BY w.canonicalArabic LIMIT 10`).bind(like,like,like).all();
   return c.json(rows.results.map(withSpellings));
 });
 app.post('/contributions',async c=>{

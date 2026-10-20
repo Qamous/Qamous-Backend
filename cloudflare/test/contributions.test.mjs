@@ -94,6 +94,8 @@ test('vowelled and unvowelled phrases share a word while each meaning retains it
  assert.equal(rows[0].meaningForms[0].meaningId,rows[1].meaningForms[0].meaningId);
  assert.notEqual(rows[0].meaningForms[0].meaningId,rows[2].meaningForms[0].meaningId);
  assert.equal(rows[0].francoArabicWord,'3alam');assert.equal(rows[2].francoArabicWord,'3ilm');
+ const search=exploreQuery(new URLSearchParams({q:'3ilm',scope:'words',script:'franco'}));
+ assert.equal(sql.prepare(search.resultsSql).all(...search.values,0,0,0,12,0)[0].definition,'knowledge');
  assert.equal(rows[0].sourcePronunciations.find(p=>p.scheme==='Arabic vocalization').value,'عَلَم');
  assert.equal(rows[2].sourcePronunciations.find(p=>p.scheme==='Arabic vocalization').value,'عِلْم');
  assert.equal(rows[0].sourceExamples[0].language,'en');

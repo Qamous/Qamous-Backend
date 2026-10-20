@@ -29,6 +29,8 @@ export function exploreQuery(params: URLSearchParams) {
         values.push(literal);
         matches.push("d.wordId IN (SELECT wordId FROM word_spellings WHERE searchText LIKE ? ESCAPE '\\')");
         values.push('%'+escapeLike(normalized)+'%');
+        matches.push("d.submissionId IN (SELECT id FROM contribution_submissions WHERE francoForm LIKE ? ESCAPE '\\')");
+        values.push('%'+escapeLike(normalized)+'%');
       }
       if (scope !== 'words') {
         matches.push('d.id IN (SELECT rowid FROM definition_search WHERE definition_search MATCH ?)');
@@ -37,10 +39,10 @@ export function exploreQuery(params: URLSearchParams) {
       filters.push('('+matches.join(' OR ')+')');
     } else {
     const columns = scope === 'words' ? ['w.searchText'] : scope === 'definitions' ? ['d.searchText'] : ['w.searchText', 'd.searchText'];
-    const aliasMatch = scope !== 'definitions' ? ` OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\')` : '';
+    const aliasMatch = scope !== 'definitions' ? ` OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\') OR d.submissionId IN (SELECT id FROM contribution_submissions WHERE francoForm LIKE ? ESCAPE '\\')` : '';
     filters.push(`(${columns.map(column => `${column} LIKE ? ESCAPE '\\'`).join(' OR ')}${aliasMatch})`);
     values.push(...columns.map(() => `%${escapeLike(normalize(query))}%`));
-    if (aliasMatch) values.push(`%${escapeLike(normalize(query))}%`);
+    if (aliasMatch) values.push(`%${escapeLike(normalize(query))}%`,`%${escapeLike(normalize(query))}%`);
     }
   }
   const preferred=script==='ar'?1:0;
