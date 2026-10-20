@@ -79,6 +79,26 @@ test('public definitions normalize source notation while preserving raw text, au
   assert.equal(sql.prepare('SELECT definition FROM definitions WHERE id=1').get().definition,rows[0].definition);
  } finally {sql.close();}
 });
+test('imported spellings follow the linked meaning and never borrow another dialect',async()=>{
+ const {sql,db}=fixture();
+ try {
+  sql.exec("UPDATE import_records SET franco='ktab',displayFranco='ktab' WHERE recordKey=1;"+
+   "INSERT INTO import_records SELECT 2,sourceId,'other-dialect',sourceUrl,importerUserId,batchId,X'02','accepted',reasons,wordId,'كِتاب','unrelated',transliteration,'Tunisian',definitionAr,definitionEn,originalMetadata,X'02',importedAt,'unrelated' FROM import_records WHERE recordKey=1;"+
+   "INSERT INTO import_records SELECT 3,sourceId,'same-meaning',sourceUrl,importerUserId,batchId,X'03','accepted',reasons,wordId,'كِتاب','ktaab',transliteration,dialect,definitionAr,definitionEn,originalMetadata,X'03',importedAt,'ktaab' FROM import_records WHERE recordKey=1;"+
+   "INSERT INTO definitions(id,wordId,userId,definition,isArabic) VALUES(3,1,2,'Another dialect meaning',0);"+
+   "INSERT INTO definition_provenance VALUES(3,2,'en',1),(1,3,'en',1);");
+  const globalVariants={arabicSpellings:['كلمة أخرى'],francoSpellings:['unrelated']};
+  const rows=await attachProvenance(db,[{definitionId:1,...globalVariants},{definitionId:2,...globalVariants},{definitionId:3,...globalVariants}]);
+  assert.equal(rows[0].francoArabicWord,'ktab');
+  assert.deepEqual(rows[0].francoSpellings,['ktaab']);
+  assert.deepEqual(rows[0].arabicSpellings,[]);
+  assert.equal(rows[2].francoArabicWord,'unrelated');
+  assert.deepEqual(rows[2].francoSpellings,[]);
+  assert.deepEqual(rows[1].francoSpellings,['unrelated']);
+  assert.equal(sql.prepare('SELECT franco FROM import_records WHERE recordKey=2').get().franco,'unrelated');
+ } finally {sql.close();}
+});
+
 test('preview routes require both an explicit local flag and a loopback hostname',()=>{
   assert.ok(isImportPreview('http://127.0.0.1:8795/imports/preview/report',{LOCAL_IMPORT_PREVIEW:'true'}));
   assert.equal(isImportPreview('https://api.qamous.org/imports/preview/report',{LOCAL_IMPORT_PREVIEW:'true'}),false);
