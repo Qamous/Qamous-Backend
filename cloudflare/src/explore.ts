@@ -1,7 +1,9 @@
 import { ApiError, escapeLike, normalize, spellingColumns } from './data.ts';
+import { feedItemsQuery } from './feed.ts';
 
 // Values are bound parameters; only the fixed sort expressions enter the SQL.
 export function exploreQuery(params: URLSearchParams) {
+  if (params.has('ids')) return feedItemsQuery(params);
   const query = (params.get('q') || '').trim();
   if (query.length > 200) throw new ApiError(400, 'Search must be 200 characters or fewer');
   const script = params.get('script') || 'both';

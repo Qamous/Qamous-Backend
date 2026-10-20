@@ -7,6 +7,7 @@ import { loadSession, createSession, logout, runtime, checkRate, digest, token, 
 import { countryCodes } from '../../src/utils/country-codes';
 import { validateWriteRequest, requireJson } from './request-policy';
 import { exploreQuery } from './explore';
+import { feedCandidatesSql, feedScript, shuffledFeed, type FeedCandidate } from './feed';
 import { parseContribution, saveContribution } from './contributions';
 export { QamousRuntime } from './runtime';
 
@@ -251,6 +252,11 @@ app.patch('/word/:id',async c=>{
   queueEmbedding(c);return c.json(changed);
 });
 
+app.get('/definitions/feed',async c=>{
+  const script=feedScript(c.req.query('script'));
+  const rows=await c.env.DB.prepare(feedCandidatesSql).bind(script).all<FeedCandidate>();
+  return c.json({definitionIds:shuffledFeed(rows.results)});
+});
 app.get('/definitions/most-liked',async c=>{
   const user=c.get('user')?.id||0,page=Math.max(1,Math.min(10000,Number(c.req.query('page'))||1)),limit=Math.max(1,Math.min(50,Number(c.req.query('limit'))||10));
   if(!Number.isInteger(page)||!Number.isInteger(limit)) throw new ApiError(400,'Invalid pagination');
