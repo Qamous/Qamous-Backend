@@ -12,6 +12,7 @@ function fixture() {
   db.exec(readFileSync(new URL('../migrations/0004_import_provenance.sql', import.meta.url), 'utf8'));
   db.exec(readFileSync(new URL('../migrations/0005_dictionary_read_indexes.sql', import.meta.url), 'utf8'));
   db.exec(readFileSync(new URL('../migrations/0006_word_meaning_forms.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0007_example_alignment.sql', import.meta.url), 'utf8'));
   db.exec(`INSERT INTO countries VALUES ('EG','Egypt'),('LB','Lebanon');
     INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES (1,'Test','User','test@example.invalid','tester','2026-01-01');`);
   const word = db.prepare('INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt,reportCount,searchText) VALUES (?,1,?,?,?,0,?)');

@@ -4,6 +4,7 @@ import { ApiError, positiveId, type Row, withWord } from './data.ts';
 import type { AppContext } from './security';
 import { formatImportedDefinition,formatImportedExample } from './definition-display.mjs';
 import { stripTashkil,hasTashkil,countryForDialect } from './arabic-model.mjs';
+import { projectExamples } from './example-alignment.mjs';
 
 export interface SourceCredit {
   sourceId: string; sourceName: string; sourceUrl: string; sourceEntryId: string;
@@ -43,14 +44,14 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
         'JOIN import_sources s ON s.id=r.sourceId JOIN users u ON u.id=r.importerUserId ' +
         'WHERE p.definitionId IN (' + placeholders + ") AND r.status IN ('accepted','duplicate') " +
         'ORDER BY s.id,r.recordKey').bind(...part).all<Row>(),
-      db.prepare('SELECT DISTINCT e.definitionId,e.text,e.language,e.script,e.kind,r.sourceId FROM definition_examples e JOIN import_records r ON r.recordKey=e.recordKey ' +
+      db.prepare('SELECT e.id,e.recordKey,e.definitionId,e.text,e.language,e.script,e.kind,e.groupKeys,e.alignment,r.sourceId,r.sourceEntryId FROM definition_examples e JOIN import_records r ON r.recordKey=e.recordKey ' +
         "WHERE e.language IN ('ar','en','ar-Latn') AND e.definitionId IN (" + placeholders + ') ORDER BY e.definitionId,e.language,e.text').bind(...part).all<Row>(),
       db.prepare('SELECT DISTINCT p.definitionId,n.scheme,n.value,n.language,n.kind,r.sourceId,s.name AS sourceName,' +
         'r.sourceUrl,r.sourceEntryId,r.dialect FROM definition_provenance p ' +
         'JOIN import_records r ON r.recordKey=p.recordKey JOIN import_sources s ON s.id=r.sourceId ' +
         'JOIN import_pronunciations n ON n.recordKey=r.recordKey WHERE p.definitionId IN (' + placeholders +
         ") AND r.status IN ('accepted','duplicate') ORDER BY p.definitionId,r.sourceId,r.sourceEntryId,n.scheme,n.value").bind(...part).all<Row>(),
-      db.prepare('SELECT d.id AS definitionId,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.dialect,s.arabicVariants,s.francoVariants,'+
+      db.prepare('SELECT d.id AS definitionId,d.example,d.arabicExample,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.exampleAlignment,s.dialect,s.arabicVariants,s.francoVariants,'+
         '(SELECT MIN(id) FROM words ww WHERE ww.canonicalArabic=w.canonicalArabic AND ww.reportCount<=5) AS canonicalWordId,'+
         '(SELECT MIN(id) FROM definitions dd WHERE dd.submissionId=s.id) AS communityMeaningId '+
         'FROM definitions d JOIN words w ON w.id=d.wordId LEFT JOIN contribution_submissions s ON s.id=d.submissionId WHERE d.id IN ('+placeholders+')').bind(...part).all<Row>(),
@@ -87,8 +88,8 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
       const id = Number(r.definitionId);
       const formatted=formatImportedExample(String(r.text),String(r.sourceId));
       const values=examples.get(id)||[];
-      if(!values.some(e=>e.text===formatted.text&&e.language===r.language&&e.script===r.script&&e.kind===r.kind)) {
-        values.push({text:formatted.text,language:r.language,script:r.script,kind:r.kind,
+      if(!values.some(e=>e.id===r.id)) {
+        values.push({id:r.id,recordKey:r.recordKey,sourceId:r.sourceId,sourceEntryId:r.sourceEntryId,groupKeys:parse<string[]>(r.groupKeys,[]),alignment:r.alignment,text:formatted.text,language:r.language,script:r.script,kind:r.kind,
           ...(formatted.changed?{originalText:r.text,sourceMarkers:formatted.sourceMarkers}:{})});
       }
       examples.set(id,values);
@@ -106,7 +107,13 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
           if(!value||(scheme==='Arabic vocalization'&&!hasTashkil(value)))continue;
           pronunciations.set(id,[...(pronunciations.get(id)||[]),{scheme,value,language:'ar',kind:scheme==='Arabic vocalization'?'vocalization':'transcription',sourceId:'',sourceName:'',sourceUrl:'',sourceEntryId:String(r.communityMeaningId||id),dialect:String(r.dialect||'')}]);
         }
-        if(r.englishExample)examples.set(id,[...(examples.get(id)||[]),{text:r.englishExample,language:'en',script:'Latin',kind:'usage'}]);
+        const parallel=r.exampleAlignment==='parallel',group='community:'+(r.communityMeaningId||id);
+        const own=examples.get(id)||[];
+        for(const [text,language,script] of [[r.arabicExample,'ar','Arabic'],[r.example,'ar-Latn','Latin'],[r.englishExample,'en','Latin']]) {
+          if(typeof text!=='string'||!text.trim())continue;
+          own.push({id:group+':'+language,text,language,script,kind:language==='en'?(parallel?'translation':'unclassified'):'usage',alignment:parallel?'community':'unverified',groupKeys:parallel?[group]:[group+':'+language]});
+        }
+        examples.set(id,own);
       }
     }
   }
@@ -120,13 +127,15 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
     const displayCountry=row.countryCode||(countryCodes.length===1?countryCodes[0]:null);
     const displayWord=typeof row.word==='object'&&row.word?{...row.word as Row,arabicWord:arabic,francoArabicWord:franco||null}:row.isArabic?arabic:franco||arabic;
     const formatted=formatImportedDefinition(String(row.definition??''),sources.map(c=>c.sourceId),row.isArabic===false||row.isArabic===0);
+    const projectedExamples=projectExamples(examples.get(id)||[]);
+    const generatedSources=new Set(projectedExamples.filter(e=>e.generated).map(e=>e.sourceId));
     return { ...row,
       ...(info?{arabicWord:arabic,francoArabicWord:franco||null,word:displayWord,canonicalWordId:info.canonicalWordId,meaningForms,
         ...(info.communityMeaningId?{arabicSpellings:parse<string[]>(info.arabicVariants,[]),francoSpellings:parse<string[]>(info.francoVariants,[])}:{}),
         countryCode:displayCountry,dialect:primary?.dialect||''}:{}),
       ...(formatted.changed?{definition:formatted.text,originalDefinition:row.definition,sourceDefinitionMarkers:formatted.sourceMarkers}:{}),
-      sourceCredits: sources.map(credit=>({...credit,changes:[...credit.changes,...formatted.changes,...(exampleChanges.get(id)||[])]})),
-      sourceExamples: examples.get(id) || [], sourcePronunciations: pronunciations.get(id) || [] };
+      sourceCredits: sources.map(credit=>({...credit,changes:[...credit.changes,...formatted.changes,...(exampleChanges.get(id)||[]),...(generatedSources.has(credit.sourceId)?['Example Franco generated by Qamous from written Arabic; unwritten vowels and dialect pronunciation have not been inferred.']:[])]})),
+      sourceExamples: projectedExamples, sourcePronunciations: pronunciations.get(id) || [] };
   });
 }
 

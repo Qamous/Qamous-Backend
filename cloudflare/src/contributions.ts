@@ -33,8 +33,10 @@ export function parseContribution(data: Row) {
   const countryCode = data.countryCode ? text(data.countryCode, 'countryCode', 2).toUpperCase() : null;
   if (countryCode && !/^[A-Z]{2}$/.test(countryCode)) throw new ApiError(400, 'Invalid country');
   const transliteration=optionalText(data.transliteration,'transliteration'),ipa=optionalText(data.ipa,'ipa');
+  if(data.exampleAlignment!==undefined&&!['parallel','unverified'].includes(String(data.exampleAlignment)))throw new ApiError(400,'Invalid example relationship');
   if ([transliteration,ipa].some(v=>v&&/\p{Script=Arabic}/u.test(v))) throw new ApiError(400,'Use the Arabic reading field for Arabic text');
   return { requestId, wordId, arabicWord, arabicForm, francoArabicWord, arabicDefinition, englishDefinition, countryCode,
+    ...(data.exampleAlignment===undefined?{}:{exampleAlignment:String(data.exampleAlignment)}),
     transliteration,ipa,dialect:optionalText(data.dialect,'dialect',100),englishExample:optionalText(data.englishExample,'englishExample',2000),
     arabicExample: optionalText(data.arabicExample, 'arabicExample',2000), francoExample: optionalText(data.francoExample, 'francoExample',2000),
     arabicSpellings: spellings(data.arabicSpellings, 'ar', arabicWord),
@@ -64,9 +66,9 @@ export async function saveContribution(db: D1Database, userId: number, input: Re
     if(input.arabicForm&&stripTashkil(input.arabicForm)!==chosenArabic)throw new ApiError(400,'Add vowels to the selected word, or choose another word');
   }
   const now = nowSql();
-  const statements = [db.prepare(`INSERT INTO contribution_submissions(id,userId,payloadHash,createdAt,arabicForm,francoForm,transliteration,ipa,englishExample,dialect,arabicVariants,francoVariants) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+  const statements = [db.prepare(`INSERT INTO contribution_submissions(id,userId,payloadHash,createdAt,arabicForm,francoForm,transliteration,ipa,englishExample,dialect,arabicVariants,francoVariants,exampleAlignment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET payloadHash=CASE WHEN contribution_submissions.userId=excluded.userId AND contribution_submissions.payloadHash=excluded.payloadHash THEN contribution_submissions.payloadHash ELSE NULL END`)
-    .bind(requestId, userId, payloadHash, now,input.arabicForm||chosenArabic,francoArabicWord,input.transliteration,input.ipa,input.englishExample,input.dialect,JSON.stringify(input.arabicSpellings),JSON.stringify(input.francoSpellings))];
+    .bind(requestId, userId, payloadHash, now,input.arabicForm||chosenArabic,francoArabicWord,input.transliteration,input.ipa,input.englishExample,input.dialect,JSON.stringify(input.arabicSpellings),JSON.stringify(input.francoSpellings),input.exampleAlignment||'unverified')];
   if (countryCode && !countryExists) statements.push(db.prepare('INSERT OR IGNORE INTO countries(countryCode,countryName) VALUES(?,?)').bind(countryCode, countryName));
   if (!wordId) {
     statements.push(db.prepare(`INSERT INTO words(userId,arabicWord,francoArabicWord,createdAt,searchText,canonicalArabic)

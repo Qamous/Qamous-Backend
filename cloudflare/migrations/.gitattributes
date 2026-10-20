@@ -1,2 +1,3 @@
 # This reviewed migration is hash-pinned by the local import overlay.
 0006_word_meaning_forms.sql text eol=lf
+0007_example_alignment.sql text eol=lf

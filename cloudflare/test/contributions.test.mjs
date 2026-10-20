@@ -9,7 +9,7 @@ import {stripTashkil,countryForDialect} from '../src/arabic-model.mjs';
 
 function fixture() {
   const sql = new DatabaseSync(':memory:');
-  for (const name of ['0001_initial.sql','0002_reaction_accounting.sql','0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql']) sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  for (const name of ['0001_initial.sql','0002_reaction_accounting.sql','0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql','0007_example_alignment.sql']) sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   sql.exec(`INSERT INTO countries VALUES('EG','Egypt');
     INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES(1,'A','','a@example.invalid','author','2026-01-01'),(2,'B','','b@example.invalid','reader','2026-01-01');`);
   const db = {
@@ -98,12 +98,30 @@ test('vowelled and unvowelled phrases share a word while each meaning retains it
  assert.equal(sql.prepare(search.resultsSql).all(...search.values,0,0,0,12,0)[0].definition,'knowledge');
  assert.equal(rows[0].sourcePronunciations.find(p=>p.scheme==='Arabic vocalization').value,'عَلَم');
  assert.equal(rows[2].sourcePronunciations.find(p=>p.scheme==='Arabic vocalization').value,'عِلْم');
- assert.equal(rows[0].sourceExamples[0].language,'en');
+ assert.ok(!rows[0].sourceExamples.some(e=>e.language==='en')); // old English samples have no declared pairing
  assert.equal(sql.prepare('SELECT points FROM users WHERE id=2').get().points,1);
  await assert.rejects(saveContribution(db,2,draft({requestId:'wrong-reading-12345678',wordId:first.wordId,arabicForm:'كِتاب'}),'wrong'),/selected word/);
  assert.equal(stripTashkil('أَكَلَ'),'أكل');assert.notEqual(stripTashkil('أكل'),stripTashkil('اكل'));
  assert.equal(countryForDialect('قاهري'),'EG');assert.equal(countryForDialect('Omani Arabic'),'OM');assert.equal(countryForDialect('Gulf Arabic'),null);assert.equal(countryForDialect('Bahrani Arabic'),null);
  sql.close();
+});
+
+test('new parallel examples retain their translation relationship and retry identity',async()=>{
+ const {sql,db}=fixture();
+ try {
+  assert.equal(Object.hasOwn(draft(),'exampleAlignment'),false);
+  const input=draft({exampleAlignment:'parallel',englishExample:'Never mind, there will be another chance.',francoExample:null});
+  const saved=await saveContribution(db,1,input,'parallel');
+  const rows=await attachProvenance(db,sql.prepare('SELECT id,wordId,definition,isArabic FROM definitions').all());
+  for(const row of rows){
+   assert.equal(new Set(row.sourceExamples.map(e=>e.groupId)).size,1);
+   assert.equal(row.sourceExamples.find(e=>e.language==='en').kind,'translation');
+   assert.equal(row.sourceExamples.find(e=>e.language==='ar-Latn').generated,true);
+  }
+  assert.deepEqual(await saveContribution(db,1,input,'parallel'),saved);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM definitions').get().n,2);
+  assert.equal(sql.prepare('SELECT points FROM users WHERE id=1').get().points,3);
+ } finally{sql.close();}
 });
 
 test('grouped cards survive voting, hiding and deletion of a vowelled variant without moving reactions',()=>{

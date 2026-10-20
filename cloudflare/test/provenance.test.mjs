@@ -18,7 +18,8 @@ function fixture() {
     "INSERT INTO import_records VALUES(1,'maknuune','sense1','https://example.org/entry',2,1,X'01','accepted','[]',1,'كتاب','','kitāb','Palestinian','','A book','{}',X'01',CURRENT_TIMESTAMP);" +
     "INSERT INTO import_change_templates VALUES(1,'[\"Extracted; text preserved.\"]');INSERT INTO definition_provenance VALUES(1,1,'en',1);" +
     "INSERT INTO definition_examples(definitionId,recordKey,text,language,script) VALUES(1,1,'A book.','en','Latin'),(1,1,'كتاب','ar','Arabic');");
-  for(const name of ['0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql'])sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  for(const name of ['0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql','0007_example_alignment.sql'])sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  sql.exec("UPDATE definition_examples SET groupKeys='[\"1:0\"]',alignment='source',kind=CASE WHEN language='en' THEN 'translation' ELSE 'usage' END;");
   const calls = [];
   const db = { prepare(query) {
     const statement = args => ({
@@ -38,7 +39,9 @@ test('cards get original credit, linked license, importer disclosure, and labele
     assert.equal(result[0].sourceCredits[0].credit,'Research authors');
     assert.equal(result[0].sourceCredits[0].importer.username,'qalam01');
     assert.equal(result[0].sourceCredits[0].transliteration,'kitāb');
-    assert.deepEqual(result[0].sourceExamples.map(e=>e.language),['ar','en']);
+    assert.deepEqual(result[0].sourceExamples.map(e=>e.language),['ar','en','ar-Latn']);
+    assert.equal(result[0].sourceExamples[2].generated,true);
+    assert.ok(result[0].sourceExamples.every(e=>e.groupId==='1:0'));
     assert.deepEqual(result[1].sourceCredits,[]);
     assert.deepEqual(result[1].sourcePronunciations,[]);
     assert.ok(!JSON.stringify(result).includes('imports.invalid'));

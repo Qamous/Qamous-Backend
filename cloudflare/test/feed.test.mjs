@@ -7,7 +7,7 @@ import { exploreQuery } from '../src/explore.ts';
 
 function fixture() {
   const db = new DatabaseSync(':memory:');
-  for (const migration of ['0001_initial.sql', '0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql']) {
+  for (const migration of ['0001_initial.sql', '0003_contributions.sql','0004_import_provenance.sql','0005_dictionary_read_indexes.sql','0006_word_meaning_forms.sql','0007_example_alignment.sql']) {
     db.exec(readFileSync(new URL('../migrations/' + migration, import.meta.url), 'utf8'));
   }
   // The deployment's public view can hide imports beyond the base report rules.

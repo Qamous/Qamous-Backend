@@ -47,7 +47,7 @@ export function exploreQuery(params: URLSearchParams) {
   }
   const preferred=script==='ar'?1:0;
   if (countries.length) { filters.push(`d.countryCode IN (${countries.map(() => '?').join(',')})`); values.push(...countries); }
-  if (params.get('examples') === '1') filters.push("(LENGTH(TRIM(COALESCE(d.example,'')))>0 OR LENGTH(TRIM(COALESCE(d.arabicExample,'')))>0 OR EXISTS(SELECT 1 FROM definition_examples e WHERE e.definitionId=d.id AND e.language IN ('ar','en','ar-Latn')))");
+  if (params.get('examples') === '1') filters.push("(LENGTH(TRIM(COALESCE(d.example,'')))>0 OR LENGTH(TRIM(COALESCE(d.arabicExample,'')))>0 OR EXISTS(SELECT 1 FROM definition_examples e WHERE e.definitionId=d.id AND e.language IN ('ar','ar-Latn') AND e.kind='usage'))");
   const cte = `WITH matches AS (
     SELECT d.*, w.arabicWord, w.francoArabicWord, d.id AS definitionId,${spellingColumns()},
       CASE WHEN d.isArabic=1 THEN w.arabicWord ELSE COALESCE(w.francoArabicWord,w.arabicWord) END AS word,
