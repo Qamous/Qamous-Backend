@@ -10,6 +10,7 @@ import { exploreQuery } from './explore';
 import { feedCandidatesSql, feedScript, shuffledFeed, type FeedCandidate } from './feed';
 import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
+import { verifyRagTurnstile } from './turnstile';
 export { QamousRuntime } from './runtime';
 
 const app=new Hono<AppContext>();
@@ -372,6 +373,7 @@ app.post('/posts',async c=>{
 });
 app.post('/rag',async c=>{
   await checkRate(c,'chatbot',5,60);const data=await body(c);const query=text(data.query,'query',2000);
+  await verifyRagTurnstile(data.turnstileToken,c.env.TURNSTILE_SECRET,new URL(c.env.APP_URL).hostname,c.req.header('cf-connecting-ip'));
   const language=data.preferredLanguage==='franco-arabic'?'franco-arabic':'arabic';
   // Store only a hash of the address used for anonymous and shared-IP budgets.
   const ipHash=await digest('chatbot:'+ (c.req.header('cf-connecting-ip')||'local'));
