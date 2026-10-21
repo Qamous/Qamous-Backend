@@ -84,3 +84,12 @@ test('only guest-specific limits prompt sign in',()=>{
   assert.equal(chatbotLimitResponse(`chatbot:${day}`,day,guest).code,undefined);
   assert.equal(chatbotLimitResponse(`chatbot:member:${day}:1`,day,member).code,undefined);
 });
+test('a depleted shared allowance takes priority over an exhausted guest address',()=>{
+  const sql=storage(),day='2026-10-21',guest={userId:null,ipHash:'guest'};
+  assert.equal(claimChatbot(sql,day,guest,5),null);
+  assert.equal(claimChatbot(sql,day,guest,5),null);
+  assert.equal(claimChatbot(sql,day,guest,5),`chatbot:guest:ip:${day}:guest`);
+  for(let n=0;n<3;n++) assert.equal(claimChatbot(sql,day,{userId:1,ipHash:'member'},5),null);
+  assert.equal(claimChatbot(sql,day,guest,5),`chatbot:${day}`);
+  sql.db.close();
+});

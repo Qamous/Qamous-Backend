@@ -11,7 +11,8 @@ export function chatbotBudgetClaims(day:string,globalLimit:number,caller:Chatbot
       {scope:`chatbot:guests:${day}`,limit:Math.floor(globalLimit*0.6),seconds:86400}]
     : [{scope:`chatbot:member:${day}:${caller.userId}`,limit:3,seconds:86400},
       {scope:`chatbot:member:ip:${day}:${caller.ipHash}`,limit:6,seconds:86400}];
-  return [...individual,{scope:`chatbot:${day}`,limit:globalLimit,seconds:86400}];
+  // Check shared capacity first so sign-in is offered only while it can help.
+  return [{scope:`chatbot:${day}`,limit:globalLimit,seconds:86400},...individual];
 }
 export function chatbotLimitResponse(blocked:string,day:string,caller:ChatbotCaller) {
   if(caller.userId===null&&blocked!==`chatbot:${day}`) return {error:'Guest chat limit reached. Sign in to keep chatting.',status:429 as const,code:'GUEST_CHAT_LIMIT' as const};
