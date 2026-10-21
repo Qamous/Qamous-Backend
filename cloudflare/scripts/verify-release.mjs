@@ -19,7 +19,8 @@ await inspect('/api/auth/session',200,data=>assert.equal(data.authenticated,fals
 for(const [path,count] of [['/api/countries',17],['/api/posts',6]]) await inspect(path,200,data=>assert.equal(data.length,count));
 for(const path of ['/api/users','/api/definitions','/api/word/search/all','/api/reactions/1/likes-dislikes']) await inspect(path,401);
 await inspect('/robots.txt',200,text=>{assert.ok(text.includes('User-agent: GPTBot'));assert.ok(text.includes('Allow: /api/definitions/word/'));assert.ok(text.includes('Sitemap: https://qamous.org/sitemap.xml'));});
-await inspect('/sitemap.xml',200,text=>{assert.ok(text.includes('https://qamous.org/word/2'));assert.ok(!text.includes('/login'));});
+await inspect('/sitemap.xml',200,text=>{assert.ok(text.includes('<sitemapindex'));assert.ok(text.includes('https://qamous.org/sitemap-static.xml'));assert.ok(text.includes('https://qamous.org/sitemap-words-'));assert.ok(!text.includes('/login'));});
+await inspect('/sitemap-static.xml',200,text=>{assert.ok(text.includes('https://qamous.org/browse/en'));assert.ok(text.includes('https://qamous.org/browse/ar'));});
 await inspect('/login',200,(_text,response)=>assert.ok(response.headers.get('x-robots-tag')?.includes('noindex')));
 await inspect('/word/2',200,(html,response)=>{assert.ok(response.headers.get('content-security-policy')?.includes("frame-ancestors 'none'"));assert.ok(html.includes('rel="canonical" href="https://qamous.org/word/2"'));});
 for(const origin of ['https://qamous.org','https://not-qamous.example']) {
