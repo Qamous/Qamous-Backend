@@ -5,7 +5,6 @@ import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
 import { Document } from '@langchain/core/documents';
 import { Word } from '../../../typeorm/entities/word';
-import { Definition } from '../../../typeorm/entities/definition';
 
 @Injectable()
 export class VectorStoreService implements OnModuleInit {
@@ -15,8 +14,6 @@ export class VectorStoreService implements OnModuleInit {
   constructor(
     @InjectRepository(Word)
     private wordRepository: Repository<Word>,
-    @InjectRepository(Definition)
-    private definitionRepository: Repository<Definition>,
   ) {
     this.embeddings = new GoogleGenerativeAIEmbeddings({
       apiKey: process.env.GEMINI_API_KEY,
@@ -75,7 +72,7 @@ export class VectorStoreService implements OnModuleInit {
 
   async retrieveContext(query: string): Promise<string> {
     try {
-      const results = await this.vectorStore.similaritySearch(query, 3);
+      const results = await this.vectorStore.similaritySearch(query, 4);
       return results
         .map(doc => {
           const source = doc.metadata.source;

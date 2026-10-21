@@ -76,16 +76,21 @@ export class RagService {
     const citedWords: CitedWord[] = [];
     const usedWords = new Set<string>();
 
-    // Get all Arabic words from the response
-    const arabicWordRegex: RegExp = /[\u0600-\u06FF]+/g;
-    const words: RegExpMatchArray | [] = response.match(arabicWordRegex) || [];
+    // Get all possible word combinations from longest to shortest
+    const words = Array.from(wordMap.keys()).sort((a, b) => b.length - a.length);
 
+    // Create a regex pattern that matches any of the known words
+    const pattern = new RegExp(words.map(w => w.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|'), 'g');
 
-    words.forEach(word => {
+    // Find all matches in the response
+    let match;
+    while ((match = pattern.exec(response)) !== null) {
+      const word = match[0];
       if (!usedWords.has(word) && wordMap.has(word)) {
-        const dbWord: Word = wordMap.get(word);
-        const englishDef: Definition = dbWord.definitions.find(d => !d.isArabic);
-        const arabicDef: Definition = dbWord.definitions.find(d => d.isArabic);
+        const dbWord = wordMap.get(word);
+        const englishDef = dbWord.definitions.find(d => !d.isArabic);
+        const arabicDef = dbWord.definitions.find(d => d.isArabic);
+
         usedWords.add(word);
         citedWords.push({
           id: dbWord.id,
@@ -96,7 +101,7 @@ export class RagService {
           example: dbWord.definitions[0]?.example
         });
       }
-    });
+    }
 
     return citedWords;
   }
