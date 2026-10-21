@@ -10,6 +10,7 @@ import { exploreQuery } from './explore';
 import { feedCandidatesSql, feedScript, shuffledFeed, type FeedCandidate } from './feed';
 import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
+import { seoIndex, seoShard, seoBucket, seoBrowse, seoRelated, seoDialect } from './seo';
 export { QamousRuntime } from './runtime';
 
 const app=new Hono<AppContext>();
@@ -189,6 +190,25 @@ app.get('/countries',async c=>c.json((await c.env.DB.prepare('SELECT * FROM coun
 app.get('/countries/:code',async c=>{
   const row=await c.env.DB.prepare('SELECT * FROM countries WHERE countryCode=?').bind(c.req.param('code').toUpperCase()).first();
   if(!row) throw new ApiError(404,'Country not found');return c.json(row);
+});
+// Public discovery data for the same-origin web Worker. API responses retain
+// noindex and the existing read rate limit.
+app.get('/seo/index',async c=>c.json(await seoIndex(c.env.DB)));
+app.get('/seo/sitemap/:bucket',async c=>c.json(await seoShard(c.env.DB,seoBucket(c.req.param('bucket')))));
+app.get('/seo/browse/:language',async c=>c.json(await seoBrowse(c.env.DB,c.req.param('language'),c.req.query('after')??null)));
+app.get('/seo/dialect/:code',async c=>c.json(await seoDialect(c.env.DB,c.req.param('code'))));
+app.get('/seo/word/:id',async c=>{
+  const id=positiveId(c.req.param('id'));
+  const canonical=await c.env.DB.prepare(`SELECT MIN(variant.id) AS id FROM words input
+    JOIN words variant ON variant.canonicalArabic=input.canonicalArabic AND variant.reportCount<5
+    WHERE input.id=?`).bind(id).first<{id:number|null}>();
+  if(!canonical?.id) throw new ApiError(404,'Word not found');
+  const rows=await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql(
+    'AND w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?) AND (d.reportCount+w.reportCount)<5'
+  )).bind(0,0,0,id).all()).results.map(row=>({...withWord(row),canonicalWordId:canonical.id})));
+  if(!rows.length) throw new ApiError(404,'Word not found');
+  const first=rows[0];
+  return c.json({rows,related:await seoRelated(c.env.DB,first.countryCode,first.arabicWord)});
 });
 app.post('/countries',async c=>{admin(c);const data=await body(c);const row=await c.env.DB.prepare('INSERT INTO countries(countryCode,countryName) VALUES(?,?) RETURNING *').bind(text(data.countryCode,'countryCode',2).toUpperCase(),text(data.countryName,'countryName')).first();return c.json(row,201);});
 app.patch('/countries/:code',async c=>{admin(c);const data=await body(c);await c.env.DB.prepare('UPDATE countries SET countryName=? WHERE countryCode=?').bind(text(data.countryName,'countryName'),c.req.param('code')).run();return c.json(changed);});
