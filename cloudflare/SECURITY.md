@@ -68,8 +68,8 @@ content. Redeploy after important content/moderation changes to refresh previews
 bulk export denial, cross-account profile denial, read/login throttles, password-change session
 revocation, legacy verification/reset/login, contributions and concurrent idempotent reactions.
 Use a fresh **local-only** persistence directory for integration fixtures; do not mutate production.
-`node scripts/verify-data.mjs --remote --live` verifies contribution checksums, IDs and sequences while
-allowing expected live password upgrades and ephemeral sessions.
+Production data verification and recovery procedures are maintained with the private ingestion and
+data operations tooling. This public runtime suite uses local-only fixtures.
 
 The sibling frontend runs typecheck/build and tests for metadata escaping, canonical paths,
 private-page indexing and script/crawler policy. `scripts/verify-release.mjs` checks public HTTPS,

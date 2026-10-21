@@ -1,0 +1,29 @@
+{
+  "name": "qamous-cloudflare-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787 --var ENABLE_AI:false --var ALLOWED_ORIGINS:http://qamous.org,http://localhost:3001,http://127.0.0.1:3001,http://localhost:8788,http://127.0.0.1:8788",
+    "types": "wrangler types",
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "test:integration": "node test/integration.mjs",
+    "billing:check": "node scripts/free-plan-guard.mjs",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "bcryptjs": "2.4.3",
+    "hono": "4.13.13",
+    "nodemailer": "10.1.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261016.1",
+    "@types/bcryptjs": "2.4.6",
+    "@types/node": "^22.19.0",
+    "@types/nodemailer": "^7.0.0",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.1"
+  }
+}

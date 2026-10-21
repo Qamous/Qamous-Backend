@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {createHash,randomBytes} from 'node:crypto';
 import {parseEnv} from 'node:util';
 import bcrypt from 'bcryptjs';
-import {sqlLiteral} from '../scripts/mysql-dump.mjs';
+const sqlLiteral=value=>"CAST(X'"+Buffer.from(value,'utf8').toString('hex')+"' AS TEXT)";
 
 // This suite mutates only the local runtime, never a production database.
 const base=process.env.QAMOUS_TEST_URL||'http://127.0.0.1:8787';
