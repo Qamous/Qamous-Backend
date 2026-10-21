@@ -5,6 +5,9 @@ import { ApiError, type UserRow } from './data';
 export type AppBindings=Env & { LEGACY_PEPPER:string; PASSWORD_PEPPER:string; SESS_SECRET:string; RESET_SECRET:string; EMAIL_USERNAME:string; EMAIL_PASSWORD:string };
 export type AppContext={Bindings:AppBindings;Variables:{user:UserRow|null;sessionKey:string|null}};
 export const COOKIE='qamous_session';
+export const SESSION_TTL_SECONDS=30*24*60*60;
+// Renew at most once a day per session instead of writing on every API request.
+const SESSION_RENEWAL_INTERVAL_SECONDS=24*60*60;
 export const token=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
 export async function digest(value:string) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
@@ -15,27 +18,29 @@ export async function loadSession(c:Context<AppContext>) {
   const session=getCookie(c,COOKIE);
   if(!session||!c.env.SESS_SECRET) return;
   const key=await digest(session+c.env.SESS_SECRET);
-  const result=await c.env.DB.prepare('SELECT data,expires FROM sessions WHERE session_id=? AND expires>?').bind(key,Math.floor(Date.now()/1000)).first<{data:string;expires:number}>();
+  const now=Math.floor(Date.now()/1000);
+  const result=await c.env.DB.prepare('SELECT data,expires FROM sessions WHERE session_id=? AND expires>?').bind(key,now).first<{data:string;expires:number}>();
   if(!result) return;
   const userId=JSON.parse(result.data).userId;
   const user=await c.env.DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<UserRow>();
   if(!user||user.accountKind==='import') return;
   c.set('user',user);c.set('sessionKey',key);
-  if(result.expires-Math.floor(Date.now()/1000)<540) {
-    await c.env.DB.prepare('UPDATE sessions SET expires=? WHERE session_id=?').bind(Math.floor(Date.now()/1000)+600,key).run();
+  if(result.expires-now<=SESSION_TTL_SECONDS-SESSION_RENEWAL_INTERVAL_SECONDS) {
+    await c.env.DB.prepare('UPDATE sessions SET expires=MAX(expires,?) WHERE session_id=? AND expires>?').bind(now+SESSION_TTL_SECONDS,key,now).run();
     setSessionCookie(c,session);
   }
 }
 function setSessionCookie(c:Context<AppContext>,session:string) {
   const secure=new URL(c.req.url).protocol==='https:';
-  setCookie(c,COOKIE,session,{httpOnly:true,secure,sameSite:'Lax',path:'/',maxAge:600});
+  setCookie(c,COOKIE,session,{httpOnly:true,secure,sameSite:'Lax',path:'/',maxAge:SESSION_TTL_SECONDS});
 }
 export async function createSession(c:Context<AppContext>,userId:number) {
   if(!c.env.SESS_SECRET) throw new ApiError(503,'Authentication is not configured');
   const raw=token();const key=await digest(raw+c.env.SESS_SECRET);
+  const now=Math.floor(Date.now()/1000);
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Math.floor(Date.now()/1000)),
-    c.env.DB.prepare('INSERT INTO sessions(session_id,expires,data) VALUES(?,?,?)').bind(key,Math.floor(Date.now()/1000)+600,JSON.stringify({userId})),
+    c.env.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(now),
+    c.env.DB.prepare('INSERT INTO sessions(session_id,expires,data) VALUES(?,?,?)').bind(key,now+SESSION_TTL_SECONDS,JSON.stringify({userId})),
   ]);
   setSessionCookie(c,raw);
 }
