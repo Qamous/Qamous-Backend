@@ -400,7 +400,7 @@ app.post('/rag',async c=>{
   // Store only a hash of the address used for anonymous and shared-IP budgets.
   const ipHash=await digest('chatbot:'+ (c.req.header('cf-connecting-ip')||'local'));
   const result=await runtime(c.env).rag(query,language,{userId:c.get('user')?.id??null,ipHash});
-  if('error' in result) throw new ApiError(result.status as 429|503,result.error!);
+  if('error' in result) return c.json({statusCode:result.status,message:result.error, ...('code' in result?{code:result.code}:{})},result.status as 429|503);
   return c.json(result);
 });
 app.post('/maintenance/embeddings',async c=>{admin(c);return c.json(await runtime(c.env).syncEmbeddings(10));});

@@ -13,6 +13,10 @@ export function chatbotBudgetClaims(day:string,globalLimit:number,caller:Chatbot
       {scope:`chatbot:member:ip:${day}:${caller.ipHash}`,limit:6,seconds:86400}];
   return [...individual,{scope:`chatbot:${day}`,limit:globalLimit,seconds:86400}];
 }
+export function chatbotLimitResponse(blocked:string,day:string,caller:ChatbotCaller) {
+  if(caller.userId===null&&blocked!==`chatbot:${day}`) return {error:'Guest chat limit reached. Sign in to keep chatting.',status:429 as const,code:'GUEST_CHAT_LIMIT' as const};
+  return {error:blocked.includes(':ip:')||blocked.includes(':member:')?'You have reached your daily chatbot limit. Please try again tomorrow.':'The free daily chatbot limit has been reached. Please try again tomorrow.',status:429 as const};
+}
 export function claimBudget(storage:BudgetStorage,scope:string,limit:number,seconds:number,now=Math.floor(Date.now()/1000)):boolean {
   if(!Number.isSafeInteger(limit)||limit<1||!Number.isSafeInteger(seconds)||seconds<1) return false;
   const rows=storage.exec(
