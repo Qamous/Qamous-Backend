@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';
 import { ApiError, type Row, type UserRow, type DictionaryRow, text, positiveId, normalize, escapeLike, nowSql, publicUser, requireUser, rankedSql, personalJoinWord, withWord, withSpellings, spellingColumns } from './data';
 import { loadSession, createSession, logout, runtime, checkRate, digest, token, type AppContext } from './security';
+import { trustedSeoRead } from './seo-trust';
 import { countryCodes } from '../../src/utils/country-codes';
 import { validateWriteRequest, requireJson } from './request-policy';
 import { exploreQuery } from './explore';
@@ -56,7 +57,8 @@ app.use('*',async(c,next)=>{
   validateWriteRequest(c.req.method,c.req.raw.headers,c.env.ALLOWED_ORIGINS.split(','));
   // Keep the deployed read API bounded per client, including workers.dev where
   // zone WAF rules do not run. This is not a claim of scraper-proof public data.
-  if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)&&!isImportPreview(c.req.url,c.env)) await checkRate(c,'read-api',120,60);
+  if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)&&!isImportPreview(c.req.url,c.env)
+    &&!trustedSeoRead(c.req.path,c.req.header('x-qamous-seo-internal'),c.env.SEO_INTERNAL_SECRET)) await checkRate(c,'read-api',120,60);
   await loadSession(c);await next();
 });
 app.onError((error,c)=>{
