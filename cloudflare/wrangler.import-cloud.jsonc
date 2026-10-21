@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qamous-import",
+  "account_id": "39292a971f28b413619657e9f2c77003",
+  "main": "src/import-host.mjs",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "qamous",
+      "database_id": "d0587244-4f3d-4209-b246-55cefbce7555"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COORDINATOR",
+        "class_name": "QamousImportState"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "QamousImportState"
+      ]
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "FREE_PLAN_BASELINE": "{\"accountId\":\"39292a971f28b413619657e9f2c77003\",\"plan\":\"Workers Free\",\"status\":\"Active\",\"source\":\"cloudflare_dashboard\",\"observedAt\":\"2026-10-20T17:29:04.252021+00:00\",\"url\":\"https://dash.cloudflare.com/39292a971f28b413619657e9f2c77003/billing/subscriptions\",\"evidence\":\"Workers Free Active; No payment method on file. Observed signed-in Cloudflare subscriptions dashboard before example alignment migration and release.\"}",
+    "IMPORT_JOB_HASH": "9be026f8db117408ec72fed931749d6531744d4369cdbe7eeb77e0ed991c7fe5"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": true
+    }
+  }
+}

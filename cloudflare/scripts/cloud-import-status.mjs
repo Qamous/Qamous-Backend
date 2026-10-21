@@ -1,0 +1,10 @@
+import {readFile,writeFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+const directory=fileURLToPath(new URL('../private/cloud-import/',import.meta.url));
+const access=JSON.parse(await readFile(directory+'access.json','utf8'));
+const response=await fetch(access.url+'/status',{headers:{Authorization:'Bearer '+access.adminToken},signal:AbortSignal.timeout(20000)});
+if(!response.ok)throw Error('Could not read private cloud import status: '+response.status);
+const status=await response.json();
+if(status.jobHash!==access.jobHash)throw Error('Cloud import job changed');
+await writeFile(directory+'status.json',JSON.stringify(status,null,2)+'\n');
+console.log(JSON.stringify(status,null,2));
