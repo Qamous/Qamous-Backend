@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {claimBudget,claimBudgetSet,chatbotBudgetClaims} from '../src/budget.ts';
+import {claimBudget,claimBudgetSet,chatbotBudgetClaims,chatbotLimitResponse} from '../src/budget.ts';
 function storage() {
   const db=new DatabaseSync(':memory:');
   db.exec('CREATE TABLE rate_limits(scope TEXT PRIMARY KEY,used INTEGER NOT NULL,reset INTEGER NOT NULL)');
@@ -75,5 +75,21 @@ test('global cap remains effective across guest and member requests',()=>{
   assert.equal(claimChatbot(sql,day,{userId:2,ipHash:'other'},2),`chatbot:${day}`);
   assert.equal(used(sql,`chatbot:member:${day}:2`),0);
   assert.equal(used(sql,`chatbot:${day}`),2);
+  sql.db.close();
+});
+test('only guest-specific limits prompt sign in',()=>{
+  const day='2026-10-21',guest={userId:null,ipHash:'guest'},member={userId:1,ipHash:'member'};
+  assert.equal(chatbotLimitResponse(`chatbot:guest:ip:${day}:guest`,day,guest).code,'GUEST_CHAT_LIMIT');
+  assert.equal(chatbotLimitResponse(`chatbot:guests:${day}`,day,guest).code,'GUEST_CHAT_LIMIT');
+  assert.equal(chatbotLimitResponse(`chatbot:${day}`,day,guest).code,undefined);
+  assert.equal(chatbotLimitResponse(`chatbot:member:${day}:1`,day,member).code,undefined);
+});
+test('a depleted shared allowance takes priority over an exhausted guest address',()=>{
+  const sql=storage(),day='2026-10-21',guest={userId:null,ipHash:'guest'};
+  assert.equal(claimChatbot(sql,day,guest,5),null);
+  assert.equal(claimChatbot(sql,day,guest,5),null);
+  assert.equal(claimChatbot(sql,day,guest,5),`chatbot:guest:ip:${day}:guest`);
+  for(let n=0;n<3;n++) assert.equal(claimChatbot(sql,day,{userId:1,ipHash:'member'},5),null);
+  assert.equal(claimChatbot(sql,day,guest,5),`chatbot:${day}`);
   sql.db.close();
 });

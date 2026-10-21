@@ -6,7 +6,7 @@ import nodemailer from 'nodemailer';
 import { connect as tlsConnect } from 'node:tls';
 import { ApiError, normalize, type DictionaryRow } from './data';
 import { digest, type AppBindings } from './security';
-import { claimBudget, claimBudgetSet, chatbotBudgetClaims, type ChatbotCaller } from './budget';
+import { claimBudget, claimBudgetSet, chatbotBudgetClaims, chatbotLimitResponse, type ChatbotCaller } from './budget';
 import { attachProvenance, type SourceCredit } from './provenance';
 
 interface EmbedResult {data:number[][];}
@@ -110,7 +110,7 @@ export class QamousRuntime extends DurableObject<AppBindings> {
     const day=new Date().toISOString().slice(0,10),globalLimit=Math.min(50,Number(this.env.AI_DAILY_LIMIT)||50);
     const claims=chatbotBudgetClaims(day,globalLimit,caller);
     const blocked=this.ctx.storage.transactionSync(()=>claimBudgetSet(this.ctx.storage.sql,claims));
-    if(blocked) return {error:blocked.includes(':ip:')||blocked.includes(':member:')?'You have reached your daily chatbot limit. Please try again tomorrow.':'The free daily chatbot limit has been reached. Please try again tomorrow.',status:429};
+    if(blocked) return chatbotLimitResponse(blocked,day,caller);
     const tokens=normalize(query).match(/[\p{L}\p{N}]+/gu)||[];
     const match=tokens.filter(t=>[...t].length>=3).slice(0,8).map(t=>'"'+t.replaceAll('"','""')+'"').join(' OR ');
     const base='SELECT d.*,w.arabicWord,w.francoArabicWord FROM public_definitions d JOIN words w ON w.id=d.wordId WHERE w.reportCount<=5 AND d.reportCount<=5';
