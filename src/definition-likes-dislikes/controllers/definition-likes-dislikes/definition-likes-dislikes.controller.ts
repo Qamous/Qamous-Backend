@@ -9,7 +9,7 @@ import {
   Logger, Body
 } from "@nestjs/common";
 import { DefinitionLikesDislikesService } from '../../services/definition-likes-dislikes/definition-likes-dislikes.service';
-import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard, LocalAuthGuard } from '../../../utils/guards/local.guard';
 import { RequestType } from 'express-serve-static-core';
 import { Throttle } from '@nestjs/throttler';
 import { UserRequest } from '../../../utils/types';
