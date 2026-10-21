@@ -373,7 +373,9 @@ app.post('/posts',async c=>{
 app.post('/rag',async c=>{
   await checkRate(c,'chatbot',5,60);const data=await body(c);const query=text(data.query,'query',2000);
   const language=data.preferredLanguage==='franco-arabic'?'franco-arabic':'arabic';
-  const result=await runtime(c.env).rag(query,language);
+  // Store only a hash of the address used for anonymous and shared-IP budgets.
+  const ipHash=await digest('chatbot:'+ (c.req.header('cf-connecting-ip')||'local'));
+  const result=await runtime(c.env).rag(query,language,{userId:c.get('user')?.id??null,ipHash});
   if('error' in result) throw new ApiError(result.status as 429|503,result.error!);
   return c.json(result);
 });

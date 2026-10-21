@@ -1,6 +1,18 @@
 export interface BudgetStorage {
   exec(query:string,...args:(string|number)[]):{toArray():Record<string,unknown>[]};
 }
+export interface BudgetClaim {scope:string;limit:number;seconds:number}
+export interface ChatbotCaller {userId:number|null;ipHash:string}
+export function chatbotBudgetClaims(day:string,globalLimit:number,caller:ChatbotCaller):BudgetClaim[] {
+  // Anonymous traffic can use at most 60% of the shared AI allowance.
+  // Account and address limits make a single caller's share smaller still.
+  const individual:BudgetClaim[]=caller.userId===null
+    ? [{scope:`chatbot:guest:ip:${day}:${caller.ipHash}`,limit:2,seconds:86400},
+      {scope:`chatbot:guests:${day}`,limit:Math.floor(globalLimit*0.6),seconds:86400}]
+    : [{scope:`chatbot:member:${day}:${caller.userId}`,limit:3,seconds:86400},
+      {scope:`chatbot:member:ip:${day}:${caller.ipHash}`,limit:6,seconds:86400}];
+  return [...individual,{scope:`chatbot:${day}`,limit:globalLimit,seconds:86400}];
+}
 export function claimBudget(storage:BudgetStorage,scope:string,limit:number,seconds:number,now=Math.floor(Date.now()/1000)):boolean {
   if(!Number.isSafeInteger(limit)||limit<1||!Number.isSafeInteger(seconds)||seconds<1) return false;
   const rows=storage.exec(
@@ -9,4 +21,19 @@ export function claimBudget(storage:BudgetStorage,scope:string,limit:number,seco
   ).toArray();
   storage.exec('DELETE FROM rate_limits WHERE reset<?',now-86400);
   return Number(rows[0].used)<=limit;
+}
+
+// Call inside one SQLite transaction so a denied caller cannot consume any
+// part of a shared allowance, and concurrent requests cannot overbook it.
+export function claimBudgetSet(storage:BudgetStorage,claims:BudgetClaim[],now=Math.floor(Date.now()/1000)):string|null {
+  if(!claims.length) return 'empty-budget';
+  const seen=new Set<string>();
+  for(const claim of claims) {
+    if(!claim.scope||seen.has(claim.scope)||!Number.isSafeInteger(claim.limit)||claim.limit<1||!Number.isSafeInteger(claim.seconds)||claim.seconds<1) return claim.scope;
+    seen.add(claim.scope);
+    const row=storage.exec('SELECT used,reset FROM rate_limits WHERE scope=?',claim.scope).toArray()[0];
+    if(row&&Number(row.reset)>now&&Number(row.used)>=claim.limit) return claim.scope;
+  }
+  for(const claim of claims) if(!claimBudget(storage,claim.scope,claim.limit,claim.seconds,now)) throw new Error('Budget changed during atomic claim');
+  return null;
 }
