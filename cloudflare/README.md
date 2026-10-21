@@ -25,6 +25,12 @@ word files. The API's SEO JSON remains `noindex`; the web Worker renders HTML
 and XML. Cached responses may lag an import or moderation change by up to five
 minutes.
 
+Set the same high-entropy `SEO_INTERNAL_SECRET` with `wrangler secret put` on
+both `qamous-web` and `qamous-api`. The website passes it only to SEO API reads
+through its service binding. Those reads bypass the API's per-IP read limit so
+large sitemap crawls do not make word pages unavailable; direct public API
+requests retain the limit. Rotate the two secrets together.
+
 Run `npm run check` and `npm test`, then use the frontend's
 `node cloudflare/verify-seo.mjs` and `node cloudflare/audit-sitemap.mjs` against
 production. Google Search Console must separately confirm sitemap processing,

@@ -2,7 +2,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import { ApiError, type UserRow } from './data';
 
-export type AppBindings=Env & { LEGACY_PEPPER:string; PASSWORD_PEPPER:string; SESS_SECRET:string; RESET_SECRET:string; EMAIL_USERNAME:string; EMAIL_PASSWORD:string; TURNSTILE_SECRET:string };
+export type AppBindings=Env & { LEGACY_PEPPER:string; PASSWORD_PEPPER:string; SESS_SECRET:string; RESET_SECRET:string; EMAIL_USERNAME:string; EMAIL_PASSWORD:string; TURNSTILE_SECRET:string; SEO_INTERNAL_SECRET?:string };
 export type AppContext={Bindings:AppBindings;Variables:{user:UserRow|null;sessionKey:string|null}};
 export const COOKIE='qamous_session';
 export const SESSION_TTL_SECONDS=30*24*60*60;
