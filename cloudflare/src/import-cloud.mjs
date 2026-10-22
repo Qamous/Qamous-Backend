@@ -1,5 +1,6 @@
 import {IMPORT_MANIFEST,IMPORT_ACCOUNT,IMPORT_DATABASE,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,importQuota,importPolicyAt,quotaRetryAt,nextImportDay,recoverCloudFlight,validateImportPacket} from './import-cloud-policy.mjs';
 import {fetchBillingProof} from '../scripts/import-billing.mjs';
+import {guardD1,READ_BUDGET_OBJECT} from './read-budget.ts';
 
 const encode=new TextEncoder();
 const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',typeof value==='string'?encode.encode(value):value))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -48,7 +49,9 @@ async function verifyIdentities(env,packet) {
   return {rowsRead:result.meta.rows_read||0};
 }
 async function integrity(env) {
-  const result=await env.DB.prepare(`SELECT 'duplicate_votes' AS check_name,COUNT(*) AS violations FROM (SELECT 1 FROM "definition-likes-dislikes" GROUP BY definitionId,userId HAVING COUNT(*)>1)
+  // Large conservative reservation, not an inference from the one returned row.
+  // The guard stops further D1 work if future growth exceeds this contract.
+  const result=await env.DB.prepare(`/* qamous-read:200000 */ SELECT 'duplicate_votes' AS check_name,COUNT(*) AS violations FROM (SELECT 1 FROM "definition-likes-dislikes" GROUP BY definitionId,userId HAVING COUNT(*)>1)
     UNION ALL SELECT 'self_votes',COUNT(*) FROM "definition-likes-dislikes" r JOIN definitions d ON d.id=r.definitionId WHERE r.userId=d.userId
     UNION ALL SELECT 'definition_counters',COUNT(*) FROM definitions d WHERE likeCount!=(SELECT COUNT(*) FROM "definition-likes-dislikes" WHERE definitionId=d.id AND liked=1) OR dislikeCount!=(SELECT COUNT(*) FROM "definition-likes-dislikes" WHERE definitionId=d.id AND liked=0)
     UNION ALL SELECT 'user_totals',COUNT(*) FROM users u WHERE likesReceived!=COALESCE((SELECT SUM(likeCount) FROM definitions WHERE userId=u.id),0) OR points!=COALESCE((SELECT SUM(contributionPoints+likeCount-dislikeCount) FROM definitions WHERE userId=u.id),0)
@@ -57,6 +60,7 @@ async function integrity(env) {
   return {passed:true,checkedAt:new Date().toISOString(),checks:result.results,rowsRead:result.meta.rows_read||0};
 }
 export async function runCloudImport(env,origin='scheduled',dependencies={}) {
+  env={...env,DB:guardD1(env.DB,env,{route:'import:packet-and-audit',tier:'import'})};
   const now=dependencies.now?.()||new Date(),started=now.toISOString();
   const loaded=await boundedObject(env.IMPORTS,stateKey(env),131072);
   if(!loaded)return {state:'not_armed',reason:'Stage and verify the immutable import objects first'};
@@ -83,6 +87,9 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     const proof=await (dependencies.billing||fetchBillingProof)(env.CLOUDFLARE_READ_TOKEN);
     if(proof.accountId!==IMPORT_ACCOUNT)throw Error('Unexpected billing account');
     const usage=await (dependencies.usage||accountUsage)(env.CLOUDFLARE_READ_TOKEN);
+    // Analytics are only an upward reconciliation signal. They never authorize
+    // work: the shared coordinator makes every pre-D1 admission synchronously.
+    await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile({...usage,observedAt:new Date().toISOString()});
     const quota=importQuota(state,usage,now);
     state.days[quota.day]??={...quota.budget,initialAccountReads:usage.rowsRead};
     state.accountUsage=usage;state.effectiveWrites=quota.effectiveWrites;state.planVerifiedAt=proof.observedAt;state.quotaPolicy=quota.policy;
@@ -127,7 +134,11 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     state.inFlight={index:state.cursor,sha256:await digest(JSON.stringify(packet)),startedAt:started,origin,reservedWrites:CLOUD_PACKET_RESERVE};
     state.status='publishing';state.reason='Applying a bounded reviewed packet';state.nextAttemptAt=null;
     await persist();
-    const results=await env.DB.batch(packet.statements.map(sql=>env.DB.prepare(sql)));
+    // The validated immutable packet remains one atomic transaction. Reserve
+    // 200k reads for its <=32 statements / <=90k SQL bytes (well above observed
+    // packet costs), and persist an overrun circuit if that expectation changes.
+    const perStatement=Math.floor(200000/packet.statements.length);
+    const results=await env.DB.batch(packet.statements.map(sql=>env.DB.prepare(`/* qamous-read:${perStatement} */ `+sql)));
     if(results.some(r=>r.success===false))throw Error('D1 transaction failed');
     const measured=costs(results);
     if(!Number.isSafeInteger(measured.rowsWritten)||!Number.isSafeInteger(measured.rowsRead))throw Error('D1 metrics are unavailable');
@@ -155,13 +166,14 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
   } catch(error) {
     if(error.code==='LEASE_LOST')return {state:'lease_lost',reason:'Another invocation owns the checkpoint; no further writes submitted'};
     const message=String(error.message||error).slice(0,500);
-    const quota=/D1.*(exceeded|quota|daily limit)|(exceeded|quota|daily limit).*D1/i.test(message);
+    const quota=error.code==='D1_READ_BUDGET'||/D1.*(exceeded|quota|daily limit)|(exceeded|quota|daily limit).*D1/i.test(message);
+    const briefBudgetHold=error.code==='D1_READ_BUDGET'&&['burn_rate','concurrency','import_concurrency','coordinator_unavailable'].includes(error.reason);
     const access=error.code==='BILLING_READ_REQUIRED';
     const retry=error.code==='RETRY_NETWORK'||/network|fetch failed|timed? ?out|temporar|overloaded|internal error|try again|database (busy|locked)|429|50[0234]/i.test(message);
     state.consecutiveFailures=(state.consecutiveFailures||0)+1;
     state.status=quota?'waiting_for_free_quota':access?'needs_access':retry?'retry_pending':'halted';state.halted=!quota&&!access&&!retry;
     state.reason=message;state.lastAttemptAt=started;
-    state.nextAttemptAt=quota?nextImportDay(now):state.halted?null:new Date(now.getTime()+(access?360:Math.min(360,15*2**Math.min(5,state.consecutiveFailures-1)))*60000).toISOString();
+    state.nextAttemptAt=briefBudgetHold?new Date(now.getTime()+Math.max(60,error.retryAfter||60)*1000).toISOString():quota?nextImportDay(now):state.halted?null:new Date(now.getTime()+(access?360:Math.min(360,15*2**Math.min(5,state.consecutiveFailures-1)))*60000).toISOString();
     delete state.lease;
     try{await persist();}catch(saveError){if(saveError.code!=='LEASE_LOST')throw saveError;}
     console.log(JSON.stringify({event:'qamous_import_wait',...publicStatus(state)}));

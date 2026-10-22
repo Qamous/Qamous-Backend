@@ -26,7 +26,7 @@ export async function loadSession(c:Context<AppContext>) {
   if(!user||user.accountKind==='import') return;
   c.set('user',user);c.set('sessionKey',key);
   if(result.expires-now<=SESSION_TTL_SECONDS-SESSION_RENEWAL_INTERVAL_SECONDS) {
-    await c.env.DB.prepare('UPDATE sessions SET expires=MAX(expires,?) WHERE session_id=? AND expires>?').bind(now+SESSION_TTL_SECONDS,key,now).run();
+    await c.env.DB.prepare('/* qamous-read:256 */ UPDATE sessions SET expires=MAX(expires,?) WHERE session_id=? AND expires>?').bind(now+SESSION_TTL_SECONDS,key,now).run();
     setSessionCookie(c,session);
   }
 }
@@ -39,14 +39,16 @@ export async function createSession(c:Context<AppContext>,userId:number) {
   const raw=token();const key=await digest(raw+c.env.SESS_SECRET);
   const now=Math.floor(Date.now()/1000);
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(now),
-    c.env.DB.prepare('INSERT INTO sessions(session_id,expires,data) VALUES(?,?,?)').bind(key,now+SESSION_TTL_SECONDS,JSON.stringify({userId})),
+    // session_expiry indexes the bounded cleanup. A login must never scan and
+    // delete an unbounded historical session table just to create one session.
+    c.env.DB.prepare('/* qamous-read:2000 */ DELETE FROM sessions WHERE session_id IN (SELECT session_id FROM sessions WHERE expires<? ORDER BY expires LIMIT 100)').bind(now),
+    c.env.DB.prepare('/* qamous-read:128 */ INSERT INTO sessions(session_id,expires,data) VALUES(?,?,?)').bind(key,now+SESSION_TTL_SECONDS,JSON.stringify({userId})),
   ]);
   setSessionCookie(c,raw);
 }
 export async function logout(c:Context<AppContext>) {
   const key=c.get('sessionKey');
-  if(key) await c.env.DB.prepare('DELETE FROM sessions WHERE session_id=?').bind(key).run();
+  if(key) await c.env.DB.prepare('/* qamous-read:128 */ DELETE FROM sessions WHERE session_id=?').bind(key).run();
   deleteCookie(c,COOKIE,{path:'/'});
 }
 export async function checkRate(c:Context<AppContext>,action:string,limit:number,seconds:number) {

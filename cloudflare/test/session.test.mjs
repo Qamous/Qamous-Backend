@@ -15,9 +15,9 @@ test('persistent login sessions in the local Workers/D1 runtime',async t=>{
     format:'esm',platform:'node',target:'es2022',external:['cloudflare:workers','cloudflare:sockets']});
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:bundled.outputFiles[0].text,
     compatibilityDate:'2026-10-16',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],
-    durableObjects:{RUNTIME:{className:'QamousRuntime',useSQLite:true}},
+    durableObjects:{RUNTIME:{className:'QamousRuntime',useSQLite:true},READ_BUDGET:{className:'QamousReadBudget',useSQLite:true},PUBLIC_CACHE:{className:'QamousPublicCache',useSQLite:true}},
     bindings:{SESS_SECRET:'synthetic-session-secret',PASSWORD_PEPPER:'synthetic-password-pepper',RESET_SECRET:'synthetic-reset-secret',
-      ALLOWED_ORIGINS:'https://qamous.org',APP_URL:'https://qamous.org',ENABLE_AI:'false'},
+      ALLOWED_ORIGINS:'https://qamous.org',APP_URL:'https://qamous.org',ENABLE_AI:'false',READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0'},
     outboundService:()=>{throw new Error('Session tests must not contact external services');}}));
   t.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB');
@@ -104,11 +104,30 @@ test('persistent login sessions in the local Workers/D1 runtime',async t=>{
     for(const old of [cookie,other]) assert.equal((await (await call('/auth/session',{cookie:old})).json()).authenticated,false);
     cookie=replacement;
   });
+  let contributionWord;
+  await t.test('guard admits a bilingual contribution with all forty alternate spellings atomically',async()=>{
+    const response=await call('/contributions',{method:'POST',cookie,data:{requestId:'guarded-contribution-1234567890',arabicWord:'اختبار حماية',francoArabicWord:'e5tebar',
+      arabicDefinition:'تعريف تجريبي',englishDefinition:'A guarded test definition',countryCode:'EG',
+      arabicSpellings:Array.from({length:20},(_,n)=>'بديل '+n),francoSpellings:Array.from({length:20},(_,n)=>'variant '+n)}});
+    assert.equal(response.status,201,await response.clone().text());
+    const result=await response.json();contributionWord=result.wordId;assert.equal(result.definitionIds.length,2);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM word_spellings WHERE wordId=?').bind(contributionWord).first()).n,40);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM definitions WHERE wordId=?').bind(contributionWord).first()).n,2);
+  });
   await t.test('password reset still revokes persistent sessions',async()=>{
     const raw=randomBytes(32).toString('hex');
     await db.prepare('INSERT INTO password_resets(token_hash,user_id,expires) VALUES(?,?,?)').bind(hash(raw+'synthetic-reset-secret'),id,now()+900).run();
     const response=await call('/users/reset-password/'+raw,{method:'POST',data:{newPassword:password+'reset'}});
     assert.equal(response.status,200);
     assert.equal((await (await call('/auth/session',{cookie})).json()).authenticated,false);
+  });
+  await t.test('guard admits seven-statement account archival and deletion atomically',async()=>{
+    cookie=cookieOf(await login(password+'reset'));
+    await db.prepare("INSERT INTO users(id,firstName,lastName,email,username,createdAt) VALUES(7,'Archive','','archive@example.invalid','archive','2026-01-01')").run();
+    const response=await call('/users/'+id,{method:'DELETE',cookie});
+    assert.equal(response.status,200,await response.clone().text());
+    assert.equal(await db.prepare('SELECT id FROM users WHERE id=?').bind(id).first(),null);
+    assert.equal((await db.prepare('SELECT userId FROM words WHERE id=?').bind(contributionWord).first()).userId,7);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM definitions WHERE wordId=? AND userId=7').bind(contributionWord).first()).n,2);
   });
 });

@@ -16,7 +16,7 @@ export function exploreQuery(params: URLSearchParams) {
   if (countries.length > 25 || countries.some(code => !/^[A-Z]{2}$/.test(code))) throw new ApiError(400, 'Invalid dialect');
   const page = Number(params.get('page') || 1);
   const limit = Number(params.get('limit') || 12);
-  if (!Number.isInteger(page) || page < 1 || page > 10000 || !Number.isInteger(limit) || limit < 1 || limit > 50) throw new ApiError(400, 'Invalid pagination');
+  if (!Number.isInteger(page) || page < 1 || page > 10000 || !Number.isInteger(limit) || limit < 1 || limit > 50 || (page-1)*limit>10_000) throw new ApiError(400, 'Invalid pagination');
   const values: (string | number)[] = [];
   const filters = ['w.reportCount<=5', 'd.reportCount<=5'];
   if (query) {
@@ -50,16 +50,20 @@ export function exploreQuery(params: URLSearchParams) {
   if (countries.length) { filters.push(`d.countryCode IN (${countries.map(() => '?').join(',')})`); values.push(...countries); }
   if (params.get('examples') === '1') filters.push("(LENGTH(TRIM(COALESCE(d.example,'')))>0 OR LENGTH(TRIM(COALESCE(d.arabicExample,'')))>0 OR EXISTS(SELECT 1 FROM definition_examples e WHERE e.definitionId=d.id AND e.language IN ('ar','ar-Latn') AND e.kind='usage'))");
   const cte = `WITH matches AS (
-    SELECT d.*, w.arabicWord, w.francoArabicWord, d.id AS definitionId,${spellingColumns()},
+    SELECT d.*, w.arabicWord, w.francoArabicWord, d.id AS definitionId,
       CASE WHEN d.isArabic=1 THEN w.arabicWord ELSE COALESCE(w.francoArabicWord,w.arabicWord) END AS word,
       (d.likeCount-d.dislikeCount) AS likeDislikeDifference,
       ROW_NUMBER() OVER(PARTITION BY w.canonicalArabic${script==='both'?',d.isArabic':''} ORDER BY ${script==='both'?'':`CASE WHEN d.isArabic=${preferred} THEN 0 ELSE 1 END,`}(d.likeCount-d.dislikeCount) DESC,d.id) AS ranking
     FROM public_definitions d JOIN words w ON w.id=d.wordId WHERE ${filters.join(' AND ')}
   )`;
   const order = sort === 'newest' ? 'm.AddedTimestamp DESC,m.definitionId DESC' : sort === 'az' ? 'm.word COLLATE NOCASE,m.definitionId' : 'm.likeDislikeDifference DESC,m.definitionId';
-  let countSql = `${cte} SELECT COUNT(*) AS total FROM matches WHERE ranking=1`;
+  // Counting groups does not need ranking, spelling aggregation or per-user
+  // reaction checks. Previously the complete expensive result CTE ran twice.
+  let countSql = `SELECT COUNT(*) AS total FROM (SELECT w.canonicalArabic${script==='both'?',d.isArabic':''}
+    FROM public_definitions d JOIN words w ON w.id=d.wordId WHERE ${filters.join(' AND ')}
+    GROUP BY w.canonicalArabic${script==='both'?',d.isArabic':''})`;
   let resultsSql = `${cte} SELECT m.wordId,m.definitionId,m.word,m.arabicWord,m.francoArabicWord,
-    m.definition,m.example,m.arabicExample,m.arabicSpellings,m.francoSpellings,m.isArabic,m.countryCode,m.likeCount,m.dislikeCount,m.likeDislikeDifference,
+    m.definition,m.example,m.arabicExample,${spellingColumns('m').replaceAll('m.id','m.wordId')},m.isArabic,m.countryCode,m.likeCount,m.dislikeCount,m.likeDislikeDifference,
     EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=m.definitionId AND r.userId=? AND r.liked=1) AS isLiked,
     EXISTS(SELECT 1 FROM "definition-likes-dislikes" r WHERE r.definitionId=m.definitionId AND r.userId=? AND r.liked=0) AS isDisliked,
     EXISTS(SELECT 1 FROM "definition-reports" r WHERE r.definitionId=m.definitionId AND r.userId=?) AS isReported

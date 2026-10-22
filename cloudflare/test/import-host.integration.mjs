@@ -18,8 +18,8 @@ const packets=Array.from({length:16},(_,i)=>{
 const pages=[JSON.stringify({packets:packets.slice(0,8)}),JSON.stringify({packets:packets.slice(8)})];
 const job={manifestHash:IMPORT_MANIFEST,representation:2,exampleAlignment:1,batchId:1,migrations:[],packetCount:16,packetsPerPage:8,totalRecords:16,pages:pages.map(value=>({sha256:hash(value)}))};
 const serialized=JSON.stringify(job),jobHash=hash(serialized);
-const built=await build({entryPoints:[fileURLToPath(new URL('../src/import-host.mjs',import.meta.url))],external:['cloudflare:workers'],bundle:true,write:false,format:'esm',platform:'browser',target:'es2022'});
-const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-10-19',compatibilityFlags:['nodejs_compat'],durableObjects:{COORDINATOR:{className:'QamousImportState',useSQLite:true}},d1Databases:['DB'],bindings:{IMPORT_JOB_HASH:jobHash,IMPORT_ADMIN_TOKEN:'synthetic-admin',CLOUDFLARE_READ_TOKEN:'synthetic-read'},outboundService:async request=>{
+const built=await build({stdin:{contents:"export {default,QamousImportState} from './src/import-host.mjs'; export {QamousReadBudget} from './src/read-budget-object.ts'; export {QamousPublicCache} from './src/public-cache.ts';",resolveDir:fileURLToPath(new URL('..',import.meta.url)),loader:'ts'},external:['cloudflare:workers'],bundle:true,write:false,format:'esm',platform:'browser',target:'es2022'});
+const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-10-19',compatibilityFlags:['nodejs_compat'],durableObjects:{COORDINATOR:{className:'QamousImportState',useSQLite:true},READ_BUDGET:{className:'QamousReadBudget',useSQLite:true},PUBLIC_CACHE:{className:'QamousPublicCache',useSQLite:true}},d1Databases:['DB'],bindings:{IMPORT_JOB_HASH:jobHash,IMPORT_ADMIN_TOKEN:'synthetic-admin',CLOUDFLARE_READ_TOKEN:'synthetic-read',READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0'},outboundService:async request=>{
   const path=new URL(request.url).pathname;
   if(path.endsWith('/subscriptions'))return Response.json({success:true,result:[{state:'Provisioned',price:0,rate_plan:{id:'workers_free',public_name:'Workers Free'}}]});
   if(path.endsWith('/graphql'))return Response.json({data:{viewer:{accounts:[{d1AnalyticsAdaptiveGroups:[{sum:{rowsWritten:0,rowsRead:0}}]}]}}});
@@ -33,6 +33,12 @@ try{
   const headers={Authorization:'Bearer synthetic-admin'};
   const call=(path,options={})=>mf.dispatchFetch('https://local'+path,{...options,headers:{...headers,...options.headers}});
   assert.equal((await mf.dispatchFetch('https://local/status')).status,401);
+  assert.equal((await mf.dispatchFetch('https://local/read-budget')).status,401);
+  assert.equal((await mf.dispatchFetch('https://local/public-cache/revision')).status,401);
+  const revision=(await call('/public-cache/revision').then(r=>r.json())).revision;
+  assert.equal((await call('/public-cache/seed',{method:'POST',body:JSON.stringify({key:'countries',value:[],revision})})).status,200);
+  assert.equal((await call('/public-cache/seed',{method:'POST',body:JSON.stringify({key:'word:1',value:[{password:'private'}],revision})})).status,400);
+  const initialBudget=await call('/read-budget').then(r=>r.json());assert.equal(initialBudget.usage.charged,0,'cache seed and private status need no D1');
   for(const [file,value] of [['pages/000000.json',pages[0]],['pages/000001.json',pages[1]],['job.json',serialized]]){
     const result=await call('/stage/'+file,{method:'PUT',headers:{'Content-Length':String(Buffer.byteLength(value)),'X-Object-Sha256':hash(value)},body:value});assert.equal(result.status,201,await result.text());
   }
@@ -55,5 +61,7 @@ try{
   assert.equal((await db.prepare('SELECT points FROM users WHERE id=1').first()).points,0);
   const before=status.days[new Date().toISOString().slice(0,10)].rowsWritten;
   await tick();assert.equal((await call('/status').then(r=>r.json())).days[new Date().toISOString().slice(0,10)].rowsWritten,before);
+  const budget=await call('/read-budget').then(r=>r.json());assert.ok(budget.usage.measured>0);assert.ok(budget.routes.some(r=>r.tier==='import'&&r.measured>0));
+  assert.equal(budget.usage.tripped,null,'rehearsed import packets and audit stay below their reservations');
   console.log(JSON.stringify({passed:true,bindings:'real local SQLite Durable Object and D1',concurrentCommitSafe:true,packets:16,deletedConsumedPages:2,remainingStagedBytes:0,ledgerPreserved:true,pointsPreserved:true,productionWrites:0}));
 }finally{await mf.dispose();}

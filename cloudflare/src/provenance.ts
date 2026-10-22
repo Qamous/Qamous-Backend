@@ -1,4 +1,4 @@
-import type { Hono } from 'hono';
+import type { Hono, Context } from 'hono';
 import { stream } from 'hono/streaming';
 import { ApiError, positiveId, type Row, withWord } from './data.ts';
 import type { AppContext } from './security';
@@ -24,6 +24,9 @@ export function licenseLink(license: string, evidenceUrl: string): string {
   return evidenceUrl;
 }
 const publicSource = (row: Row) => ({...row,licenseUrl:licenseLink(String(row.license),String(row.licenseUrl))});
+async function orderedReads<T>(queries:(()=>Promise<T>)[]):Promise<T[]> {
+  const results:T[]=[];for(const query of queries) results.push(await query());return results;
+}
 export function isImportPreview(url: string, env: object): boolean {
   const flag = (env as { LOCAL_IMPORT_PREVIEW?: string | boolean }).LOCAL_IMPORT_PREVIEW;
   return (flag === 'true' || flag === true)
@@ -36,22 +39,24 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
   const credits = new Map<number, SourceCredit[]>(), examples = new Map<number, Row[]>(), pronunciations = new Map<number, Row[]>(),forms=new Map<number,Row[]>(), community=new Map<number,Row>(),exampleChanges=new Map<number,Set<string>>();
   for (let i = 0; i < ids.length; i += 90) {
     const part = ids.slice(i, i + 90), placeholders = part.map(() => '?').join(',');
-    const [sourceRows, exampleRows, pronunciationRows, formRows] = await Promise.all([
-      db.prepare('SELECT p.definitionId,t.text AS changes,s.id AS sourceId,s.name AS sourceName,' +
+    // One public-cache refresh holds only one global read reservation at a
+    // time. Concurrent word misses must not multiply four parallel leases.
+    const [sourceRows, exampleRows, pronunciationRows, formRows] = await orderedReads([
+      ()=>db.prepare('SELECT p.definitionId,t.text AS changes,s.id AS sourceId,s.name AS sourceName,' +
         's.license,s.licenseUrl,s.rightsStatus,s.attributionRequired,s.credit,s.notice,' +
         'r.sourceUrl,r.sourceEntryId,r.dialect,r.transliteration,r.originalMetadata,r.recordKey,r.arabic,r.franco,r.displayFranco,u.username ' +
         'FROM definition_provenance p JOIN import_change_templates t ON t.id=p.changes JOIN import_records r ON r.recordKey=p.recordKey ' +
         'JOIN import_sources s ON s.id=r.sourceId JOIN users u ON u.id=r.importerUserId ' +
         'WHERE p.definitionId IN (' + placeholders + ") AND r.status IN ('accepted','duplicate') " +
         'ORDER BY s.id,r.recordKey').bind(...part).all<Row>(),
-      db.prepare('SELECT e.id,e.recordKey,e.definitionId,e.text,e.language,e.script,e.kind,e.groupKeys,e.alignment,r.sourceId,r.sourceEntryId FROM definition_examples e JOIN import_records r ON r.recordKey=e.recordKey ' +
+      ()=>db.prepare('SELECT e.id,e.recordKey,e.definitionId,e.text,e.language,e.script,e.kind,e.groupKeys,e.alignment,r.sourceId,r.sourceEntryId FROM definition_examples e JOIN import_records r ON r.recordKey=e.recordKey ' +
         "WHERE e.language IN ('ar','en','ar-Latn') AND e.definitionId IN (" + placeholders + ') ORDER BY e.definitionId,e.language,e.text').bind(...part).all<Row>(),
-      db.prepare('SELECT DISTINCT p.definitionId,n.scheme,n.value,n.language,n.kind,r.sourceId,s.name AS sourceName,' +
+      ()=>db.prepare('SELECT DISTINCT p.definitionId,n.scheme,n.value,n.language,n.kind,r.sourceId,s.name AS sourceName,' +
         'r.sourceUrl,r.sourceEntryId,r.dialect FROM definition_provenance p ' +
         'JOIN import_records r ON r.recordKey=p.recordKey JOIN import_sources s ON s.id=r.sourceId ' +
         'JOIN import_pronunciations n ON n.recordKey=r.recordKey WHERE p.definitionId IN (' + placeholders +
         ") AND r.status IN ('accepted','duplicate') ORDER BY p.definitionId,r.sourceId,r.sourceEntryId,n.scheme,n.value").bind(...part).all<Row>(),
-      db.prepare('SELECT d.id AS definitionId,d.example,d.arabicExample,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.exampleAlignment,s.dialect,s.arabicVariants,s.francoVariants,'+
+      ()=>db.prepare('SELECT d.id AS definitionId,d.example,d.arabicExample,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.exampleAlignment,s.dialect,s.arabicVariants,s.francoVariants,'+
         '(SELECT json_group_array(c.isArabic) FROM dictionary_cards c WHERE c.canonicalArabic=w.canonicalArabic) AS definitionLanguages,'+
         '(SELECT MIN(id) FROM words ww WHERE ww.canonicalArabic=w.canonicalArabic AND ww.reportCount<=5) AS canonicalWordId,'+
         '(SELECT MIN(id) FROM definitions dd WHERE dd.submissionId=s.id) AS communityMeaningId '+
@@ -149,7 +154,7 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
   });
 }
 
-export function registerProvenanceRoutes(app: Hono<AppContext>) {
+export function registerProvenanceRoutes(app: Hono<AppContext>,cached?:(c:Context<AppContext>,key:string)=>Promise<unknown>) {
   app.get('/sources/:id/license', async c => {
     const doc = await c.env.DB.prepare('SELECT fileName,text FROM import_license_documents WHERE sourceId=?')
       .bind(c.req.param('id')).first<{ fileName: string; text: string }>();
@@ -194,7 +199,7 @@ export function registerProvenanceRoutes(app: Hono<AppContext>) {
       }
     });
   });
-  app.get('/sources', async c => c.json((await c.env.DB.prepare('SELECT id,name,sourceUrl,license,licenseUrl,' +
+  app.get('/sources', async c => c.json(cached?await cached(c,'sources'):(await c.env.DB.prepare('SELECT id,name,sourceUrl,license,licenseUrl,' +
     'rightsStatus,credit,notice,attributionRequired,releaseHash FROM import_sources ORDER BY name').all()).results.map(publicSource)));
   app.get('/sources/:id', async c => {
     const row = await c.env.DB.prepare('SELECT id,name,sourceUrl,license,licenseUrl,rightsStatus,credit,notice,' +

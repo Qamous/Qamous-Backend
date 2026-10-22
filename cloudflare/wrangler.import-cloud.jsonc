@@ -21,6 +21,16 @@
       {
         "name": "COORDINATOR",
         "class_name": "QamousImportState"
+      },
+      {
+        "name": "READ_BUDGET",
+        "class_name": "QamousReadBudget",
+        "script_name": "qamous-api"
+      },
+      {
+        "name": "PUBLIC_CACHE",
+        "class_name": "QamousPublicCache",
+        "script_name": "qamous-api"
       }
     ]
   },

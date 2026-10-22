@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import { ApiError, type Row, type UserRow, type DictionaryRow, text, positiveId, normalize, escapeLike, nowSql, publicUser, requireUser, rankedSql, personalJoinWord, withWord, withSpellings, spellingColumns } from './data';
 import { loadSession, createSession, logout, runtime, checkRate, digest, token, type AppContext } from './security';
 import { trustedSeoRead } from './seo-trust';
+import { guardD1,ReadBudgetError } from './read-budget';
 import { countryCodes } from '../../src/utils/country-codes';
 import { validateWriteRequest, requireJson } from './request-policy';
 import { exploreQuery } from './explore';
@@ -13,7 +14,11 @@ import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
 import { verifyRagTurnstile } from './turnstile';
 import { seoIndex, seoShard, seoBucket, seoBrowse, seoRelated, seoDialect } from './seo';
+import { publicData, publicDataMany, publicMutationBarrier } from './public-cache';
+import { exploreCacheKey, relatedKey, personalReactions, publicItemBuckets, publicItemsFromBuckets } from './public-data';
 export { QamousRuntime } from './runtime';
+export { QamousPublicCache } from './public-cache';
+export { QamousReadBudget } from './read-budget-object';
 
 const app=new Hono<AppContext>();
 const withoutSearch=(row:Row)=>{const {searchText,submissionId,...rest}=row;return rest;};
@@ -59,9 +64,21 @@ app.use('*',async(c,next)=>{
   // zone WAF rules do not run. This is not a claim of scraper-proof public data.
   if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)&&!isImportPreview(c.req.url,c.env)
     &&!trustedSeoRead(c.req.path,c.req.header('x-qamous-seo-internal'),c.env.SEO_INTERNAL_SECRET)) await checkRate(c,'read-api',120,60);
-  await loadSession(c);await next();
+  // Hono owns this context. Replace its bindings object; never mutate the
+  // runtime's shared env.DB binding or allow a route to retain an unguarded DB.
+  const original=c.env;
+  c.env={...original,DB:guardD1(original.DB,original,{route:'session',tier:'essential'})};
+  await loadSession(c);
+  const essential=c.req.path.startsWith('/auth/')||c.req.path.startsWith('/users/reset-password')||(!['GET','HEAD','OPTIONS'].includes(c.req.method)&&!!c.get('user'));
+  const changesPublic=!['GET','HEAD','OPTIONS'].includes(c.req.method)&&(
+    /^\/(?:contributions|posts|word(?:\/\d+)?|definitions(?:\/\d+)?|word-reports(?:\/\d+)?|definition-reports(?:\/\d+)?|countries(?:\/[A-Za-z]{2})?)$/.test(c.req.path)
+    || (c.req.method==='DELETE' && /^\/users\/\d+$/.test(c.req.path)));
+  const barrier=changesPublic?publicMutationBarrier(original):undefined;
+  c.env={...original,DB:guardD1(original.DB,original,{route:c.req.path,tier:essential?'essential':'public',beforeWrite:barrier?.beforeWrite,unknownWrite:barrier?.unknownWrite})};
+  try {await next();} finally {await barrier?.finish();}
 });
 app.onError((error,c)=>{
+  if(error instanceof ReadBudgetError||error.name==='ReadBudgetError') {c.header('Retry-After',String(error instanceof ReadBudgetError?error.retryAfter:60));return c.json({statusCode:503,code:'D1_READ_BUDGET',message:error.message},503);}
   if(error instanceof ApiError) return c.json({statusCode:error.status,message:error.message},error.status);
   if(/UNIQUE constraint failed/i.test(error.message)) return c.json({statusCode:409,message:'A record with those details already exists'},409);
   // Never log a database row, password, email credential, cookie or model payload.
@@ -84,7 +101,7 @@ app.post('/auth/login',async c=>{
   if(!user?.password||!await runtime(c.env,`password:${user.id}`).verifyPassword(pass,user.password,user.passwordVersion)) throw new ApiError(401,'Invalid credentials');
   if(user.passwordVersion==='legacy') {
     const upgraded=await runtime(c.env,`password:${user.id}`).hashPassword(pass);
-    await c.env.DB.prepare('UPDATE users SET password=?,passwordVersion=? WHERE id=? AND password=?').bind(upgraded,'v2',user.id,user.password).run();
+    await c.env.DB.prepare('/* qamous-read:128 */ UPDATE users SET password=?,passwordVersion=? WHERE id=? AND password=?').bind(upgraded,'v2',user.id,user.password).run();
   }
   await createSession(c,user.id);return c.json(publicUser(user,true));
 });
@@ -148,14 +165,17 @@ app.delete('/users/:id',async c=>{
   if(id===7) throw new ApiError(403,'The contribution archive account cannot be deleted');
   const archive=await c.env.DB.prepare('SELECT id FROM users WHERE id=7').first();
   if(!archive) throw new ApiError(503,'Contribution archive account is unavailable');
+  // Keep the seven-step archival/delete transaction atomic with 210k rows of
+  // conservative cascade/index headroom, rather than seven default scan holds.
+  const prepareDelete=(sql:string)=>c.env.DB.prepare('/* qamous-read:30000 */ '+sql);
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE words SET userId=7 WHERE userId=?').bind(id),
-    c.env.DB.prepare('UPDATE definitions SET userId=7 WHERE userId=?').bind(id),
-    c.env.DB.prepare('UPDATE word_spellings SET userId=7 WHERE userId=?').bind(id),
-    c.env.DB.prepare('UPDATE contribution_submissions SET userId=7 WHERE userId=?').bind(id),
-    c.env.DB.prepare('UPDATE posts SET userId=? WHERE userId=?').bind('7',String(id)),
-    c.env.DB.prepare("DELETE FROM sessions WHERE json_extract(data,'$.userId')=?").bind(id),
-    c.env.DB.prepare('DELETE FROM users WHERE id=?').bind(id),
+    prepareDelete('UPDATE words SET userId=7 WHERE userId=?').bind(id),
+    prepareDelete('UPDATE definitions SET userId=7 WHERE userId=?').bind(id),
+    prepareDelete('UPDATE word_spellings SET userId=7 WHERE userId=?').bind(id),
+    prepareDelete('UPDATE contribution_submissions SET userId=7 WHERE userId=?').bind(id),
+    prepareDelete('UPDATE posts SET userId=? WHERE userId=?').bind('7',String(id)),
+    prepareDelete("DELETE FROM sessions WHERE json_extract(data,'$.userId')=?").bind(id),
+    prepareDelete('DELETE FROM users WHERE id=?').bind(id),
   ]);
   await logout(c);return c.json(deleted);
 });
@@ -189,44 +209,57 @@ app.post('/users/reset-password/:token',async c=>{
   return c.json({message:'Password updated successfully'});
 });
 
-app.get('/countries',async c=>c.json((await c.env.DB.prepare('SELECT * FROM countries ORDER BY countryName').all()).results));
+app.get('/countries',async c=>c.json(await publicData<Row[]>(c.env,'countries')));
 app.get('/countries/:code',async c=>{
-  const row=await c.env.DB.prepare('SELECT * FROM countries WHERE countryCode=?').bind(c.req.param('code').toUpperCase()).first();
+  const row=(await publicData<Row[]>(c.env,'countries')).find(row=>row.countryCode===c.req.param('code').toUpperCase());
   if(!row) throw new ApiError(404,'Country not found');return c.json(row);
 });
 // Public discovery data for the same-origin web Worker. API responses retain
 // noindex and the existing read rate limit.
-app.get('/seo/index',async c=>c.json(await seoIndex(c.env.DB)));
-app.get('/seo/sitemap/:bucket',async c=>c.json(await seoShard(c.env.DB,seoBucket(c.req.param('bucket')))));
-app.get('/seo/browse/:language',async c=>c.json(await seoBrowse(c.env.DB,c.req.param('language'),c.req.query('after')??null)));
-app.get('/seo/dialect/:code',async c=>c.json(await seoDialect(c.env.DB,c.req.param('code'))));
+app.get('/seo/index',async c=>c.json(await publicData<Row>(c.env,'seo-index')));
+app.get('/seo/sitemap/:bucket',async c=>c.json(await publicData<Row[]>(c.env,'seo-shard:'+seoBucket(c.req.param('bucket')))));
+app.get('/seo/browse/:language',async c=>{
+  const language=c.req.param('language'),after=c.req.query('after')||'';
+  if(!['ar','en'].includes(language) || (after&&!/^[1-9]\d{0,15}$/.test(after))) throw new ApiError(404,'Browse page not found');
+  return c.json(await publicData<Row>(c.env,`seo-browse:${language}:${after}`));
+});
+app.get('/seo/dialect/:code',async c=>{
+  const code=text(c.req.param('code'),'dialect',100);
+  return c.json(await publicData<Row>(c.env,'seo-dialect:'+encodeURIComponent(code)));
+});
 app.get('/seo/word/:id',async c=>{
   const id=positiveId(c.req.param('id'));
-  const canonical=await c.env.DB.prepare(`SELECT MIN(variant.id) AS id FROM words input
-    JOIN words variant ON variant.canonicalArabic=input.canonicalArabic AND variant.reportCount<5
-    WHERE input.id=?`).bind(id).first<{id:number|null}>();
-  if(!canonical?.id) throw new ApiError(404,'Word not found');
-  const rows=await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql(
-    'AND w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?) AND (d.reportCount+w.reportCount)<5'
-  )).bind(0,0,0,id).all()).results.map(row=>({...withWord(row),canonicalWordId:canonical.id})));
-  if(!rows.length) throw new ApiError(404,'Word not found');
-  const first=rows[0];
-  return c.json({rows,related:await seoRelated(c.env.DB,first.countryCode,first.arabicWord)});
+  const rows=await publicData<Row[]>(c.env,'word:'+id),first=rows[0];
+  let related:Row={country:null,words:[],byLanguage:{en:{results:[]},ar:{results:[]}}};
+  if(typeof first.countryCode==='string' && /^[A-Z]{2}$/.test(first.countryCode)) {
+    // Optional discovery must never take the visible word offline when a
+    // global read reservation is denied and these pools have not been cached.
+    try {
+      const [countries,en,ar]=await Promise.all([
+        publicData<Row[]>(c.env,'countries'),
+        publicData<{results:Row[]}>(c.env,relatedKey(first.countryCode,'franco')),
+        publicData<{results:Row[]}>(c.env,relatedKey(first.countryCode,'ar')),
+      ]);
+      const links=[...new Map([...en.results,...ar.results].map(row=>[Number(row.wordId),row])).values()]
+        .filter(row=>Number(row.wordId)!==id).slice(0,5);
+      related={country:countries.find(country=>country.countryCode===first.countryCode)||null,
+        words:links.map(row=>({id:row.wordId,canonicalArabic:row.arabicWord,francoArabicWord:row.francoArabicWord})),byLanguage:{en,ar}};
+    } catch {console.log(JSON.stringify({event:'optional_discovery_omitted',route:'seo-word'}));}
+  }
+  return c.json({rows,related});
 });
 app.post('/countries',async c=>{admin(c);const data=await body(c);const row=await c.env.DB.prepare('INSERT INTO countries(countryCode,countryName) VALUES(?,?) RETURNING *').bind(text(data.countryCode,'countryCode',2).toUpperCase(),text(data.countryName,'countryName')).first();return c.json(row,201);});
 app.patch('/countries/:code',async c=>{admin(c);const data=await body(c);await c.env.DB.prepare('UPDATE countries SET countryName=? WHERE countryCode=?').bind(text(data.countryName,'countryName'),c.req.param('code')).run();return c.json(changed);});
 app.delete('/countries/:code',async c=>{admin(c);await c.env.DB.prepare('DELETE FROM countries WHERE countryCode=?').bind(c.req.param('code')).run();return c.json(deleted);});
 
 app.get('/word/explore',async c=>{
-  const query=exploreQuery(new URL(c.req.url).searchParams);
-  const {countSql,resultsSql,values,page,limit}=query;
-  const user=c.get('user')?.id||0;
-  const [count,rows]=await c.env.DB.batch<Row>([
-    c.env.DB.prepare(countSql).bind(...values),
-    c.env.DB.prepare(resultsSql).bind(...(query.fastFeed?[user,user,user,...values,limit,(page-1)*limit]:[...values,user,user,user,limit,(page-1)*limit])),
-  ]);
-  return c.json({results:await attachProvenance(c.env.DB,rows.results.map(withSpellings)),total:Number(count.results[0]?.total||0),page,limit});
+  const params=new URL(c.req.url).searchParams;
+  const data=params.has('ids')
+    ?publicItemsFromBuckets(params,await publicDataMany<Row[]>(c.env,publicItemBuckets(params)))
+    :await publicData<{results:Row[];total:number;page:number;limit:number}>(c.env,exploreCacheKey(params));
+  return c.json({...data,results:await personalReactions(c.env.DB,data.results,c.get('user')?.id||0)});
 });
+app.get('/word/related',async c=>c.json(await publicData<Row>(c.env,relatedKey(c.req.query('country'),c.req.query('script')))));
 app.get('/word/search/all',async c=>{admin(c);return c.json((await c.env.DB.prepare('SELECT id,userId,arabicWord,francoArabicWord,createdAt,reportCount FROM words ORDER BY id').all()).results);});
 app.get('/word/search/:filter',async c=>{
   const filter=c.req.param('filter');const user=c.get('user')?.id||0;
@@ -286,8 +319,10 @@ app.patch('/word/:id',async c=>{
 
 app.get('/definitions/feed',async c=>{
   const script=feedScript(c.req.query('script'));
-  const rows=await c.env.DB.prepare(feedCandidatesSql).bind(script).all<FeedCandidate>();
-  return c.json({definitionIds:shuffledFeed(rows.results)});
+  const rows=await publicData<FeedCandidate[]>(c.env,'feed:'+script);
+  // Cache candidate weights, never the permutation: every visit still gets a
+  // fresh weighted order while its browser retains a stable ID snapshot.
+  return c.json({definitionIds:shuffledFeed(rows)});
 });
 app.get('/definitions/most-liked',async c=>{
   const user=c.get('user')?.id||0,page=Math.max(1,Math.min(10000,Number(c.req.query('page'))||1)),limit=Math.max(1,Math.min(50,Number(c.req.query('limit'))||10));
@@ -301,7 +336,10 @@ app.get('/definitions/random-matching',async c=>{
   return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql('AND d.wordId=?')).bind(user,user,user,word.wordId).all()).results.map(withSpellings)));
 });
 app.get('/definitions/user/:id',async c=>{const user=owner(c,positiveId(c.req.param('id'))).id;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE d.userId=? ORDER BY d.id').bind(user,user,user,user).all()).results.map(withWord)));});
-app.get('/definitions/word/:id',async c=>{const user=c.get('user')?.id||0;return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(personalJoinWord+' WHERE w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?) AND (d.reportCount+w.reportCount)<5 ORDER BY d.id').bind(user,user,user,positiveId(c.req.param('id'))).all()).results.map(withWord)));});
+app.get('/definitions/word/:id',async c=>{
+  const rows=await publicData<Row[]>(c.env,'word:'+positiveId(c.req.param('id')));
+  return c.json(await personalReactions(c.env.DB,rows,c.get('user')?.id||0));
+});
 app.get('/definitions/:id/country',async c=>{
   const row=await c.env.DB.prepare('SELECT c.* FROM countries c JOIN public_definitions d ON d.countryCode=c.countryCode WHERE d.id=?').bind(positiveId(c.req.param('id'))).first();
   return c.json(row);
@@ -386,7 +424,7 @@ for(const type of ['word','definition'] as const) {
   app.delete(`${base}/:id`,async c=>{admin(c);const id=positiveId(c.req.param('id'));await c.env.DB.batch([c.env.DB.prepare(`UPDATE ${targetTable} SET reportCount=MAX(0,reportCount-1) WHERE id=(SELECT ${column} FROM ${table} WHERE id=?)`).bind(id),c.env.DB.prepare(`DELETE FROM ${table} WHERE id=?`).bind(id)]);return c.json(deleted);});
 }
 
-app.get('/posts',async c=>c.json((await c.env.DB.prepare('SELECT * FROM posts ORDER BY createdSeconds DESC,createdNanoseconds DESC').all<{id:string;userId:string;title:string;content:string;createdSeconds:number;createdNanoseconds:number}>()).results.map(p=>({id:p.id,userId:p.userId,title:p.title,content:p.content,createdAt:{seconds:p.createdSeconds,nanoseconds:p.createdNanoseconds}}))));
+app.get('/posts',async c=>c.json(await publicData(c.env,'posts')));
 app.post('/posts',async c=>{
   const user=requireUser(c.get('user'));await checkRate(c,'post',5,3600);const data=await body(c);
   const title=text(data.title,'title',250),content=text(data.content,'content',20000),id=crypto.randomUUID(),ms=Date.now();
@@ -407,6 +445,6 @@ app.post('/maintenance/embeddings',async c=>{admin(c);return c.json(await runtim
 app.post('/maintenance/mailer-check',async c=>{admin(c);const result=await runtime(c.env).verifyMailer();return c.json({configured:result.ok,diagnostic:result.ok?undefined:result});});
 app.post('/users/recalculate-points',c=>{admin(c);throw new ApiError(409,'Historical points are preserved; bulk recalculation is disabled');});
 app.post('/reactions/recalculate-all',c=>{admin(c);throw new ApiError(409,'Historical counters are preserved; bulk recalculation is disabled');});
-registerProvenanceRoutes(app);
+registerProvenanceRoutes(app,(c,key)=>publicData(c.env,key));
 app.notFound(c=>c.json({message:'Route not found'},404));
 export default app;

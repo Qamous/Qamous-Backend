@@ -60,7 +60,8 @@ async function fixture(time='22:00:01',writes=65241){
   const jobText=JSON.stringify(job),jobHash=hash(jobText),key='jobs/'+jobHash+'/';
   const checkpoint={...state(writes),...waiting,jobHash,manifestHash:IMPORT_MANIFEST,cursor:0,packetCount:1,completedRecords:0,totalRecords:1,schemaVerifiedAt:now.toISOString(),recoveryPoint:{createdAt:now.toISOString()}};
   await objects.put(key+'checkpoint.json',JSON.stringify(checkpoint));await objects.put(key+'job.json',jobText);await objects.put(key+'pages/000000.json',page);
-  const env={IMPORTS:objects,IMPORT_JOB_HASH:jobHash,CLOUDFLARE_READ_TOKEN:'synthetic',DB:{prepare:sql=>({sql}),batch:async()=>{batches++;return [{success:true,meta:{rows_written:300,rows_read:10,size_after:1000}}];}}};
+  const budget={reserve:async request=>({allowed:true,id:request.id,day:now.toISOString().slice(0,10),reserved:request.rows}),settle:async()=>({settled:true}),reconcile:async()=>({})};
+  const env={IMPORTS:objects,IMPORT_JOB_HASH:jobHash,CLOUDFLARE_READ_TOKEN:'synthetic',READ_BUDGET:{getByName:()=>budget},DB:{prepare:sql=>({sql}),batch:async()=>{batches++;return [{success:true,meta:{rows_written:300,rows_read:10,size_after:1000}}];}}};
   const deps={now:()=>now,billing:async()=>({accountId:IMPORT_ACCOUNT,observedAt:now.toISOString()}),usage:async()=>usage(writes),audit:async()=>({passed:true,rowsRead:5})};
   return {env,deps,objects,key,get batches(){return batches;},set time(time){now=at(time);}};
 }
@@ -85,4 +86,11 @@ test('late window never submits a packet which cannot fit its unchanged reservat
 test('restart recovery still charges an uncertain packet only once on its original day',()=>{
   const s={...state(65241),cursor:0,inFlight:{index:0,startedAt:'2026-10-21T22:01:00Z',reservedWrites:10000}};
   assert.equal(recoverCloudFlight(s,new Date('2026-10-22T00:15:00Z')),true);assert.equal(s.days['2026-10-21'].rowsWritten,75241);assert.equal(recoverCloudFlight(s),false);
+});
+
+test('global read guard pauses import before SQL even when analytics report low usage',async()=>{
+  const f=await fixture();
+  f.env.READ_BUDGET.getByName=()=>({reconcile:async()=>({}),reserve:async()=>({allowed:false,reason:'import_paused',retryAfter:3600})});
+  const result=await runCloudImport(f.env,'scheduled',f.deps);
+  assert.equal(result.state,'waiting_for_free_quota');assert.equal(f.batches,0);assert.equal(result.cursor,0);
 });

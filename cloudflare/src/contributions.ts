@@ -66,36 +66,41 @@ export async function saveContribution(db: D1Database, userId: number, input: Re
     if(input.arabicForm&&stripTashkil(input.arabicForm)!==chosenArabic)throw new ApiError(400,'Add vowels to the selected word, or choose another word');
   }
   const now = nowSql();
-  const statements = [db.prepare(`INSERT INTO contribution_submissions(id,userId,payloadHash,createdAt,arabicForm,francoForm,transliteration,ipa,englishExample,dialect,arabicVariants,francoVariants,exampleAlignment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+  // A contribution has at most 49 statements, each inserting/updating one
+  // record through indexed keys. Reserve substantial trigger/index headroom
+  // per statement while retaining the original atomic transaction. A measured
+  // aggregate overrun opens the shared read circuit; LIMIT is never a bound.
+  const prepareWrite=(sql:string)=>db.prepare('/* qamous-read:4000 */ '+sql);
+  const statements = [prepareWrite(`INSERT INTO contribution_submissions(id,userId,payloadHash,createdAt,arabicForm,francoForm,transliteration,ipa,englishExample,dialect,arabicVariants,francoVariants,exampleAlignment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET payloadHash=CASE WHEN contribution_submissions.userId=excluded.userId AND contribution_submissions.payloadHash=excluded.payloadHash THEN contribution_submissions.payloadHash ELSE NULL END`)
     .bind(requestId, userId, payloadHash, now,input.arabicForm||chosenArabic,francoArabicWord,input.transliteration,input.ipa,input.englishExample,input.dialect,JSON.stringify(input.arabicSpellings),JSON.stringify(input.francoSpellings),input.exampleAlignment||'unverified')];
-  if (countryCode && !countryExists) statements.push(db.prepare('INSERT OR IGNORE INTO countries(countryCode,countryName) VALUES(?,?)').bind(countryCode, countryName));
+  if (countryCode && !countryExists) statements.push(prepareWrite('INSERT OR IGNORE INTO countries(countryCode,countryName) VALUES(?,?)').bind(countryCode, countryName));
   if (!wordId) {
-    statements.push(db.prepare(`INSERT INTO words(userId,arabicWord,francoArabicWord,createdAt,searchText,canonicalArabic)
+    statements.push(prepareWrite(`INSERT INTO words(userId,arabicWord,francoArabicWord,createdAt,searchText,canonicalArabic)
       SELECT ?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM words WHERE canonicalArabic=?)
       AND (SELECT wordId FROM contribution_submissions WHERE id=?) IS NULL`)
       .bind(userId, arabicWord, francoArabicWord, now, normalize(`${arabicWord} ${francoArabicWord || ''}`),arabicWord, arabicWord, requestId));
   }
-  statements.push(db.prepare(`UPDATE contribution_submissions SET wordId=COALESCE(wordId,${wordId ? '?' : '(SELECT id FROM words WHERE canonicalArabic=? ORDER BY id LIMIT 1)'}) WHERE id=?`)
+  statements.push(prepareWrite(`UPDATE contribution_submissions SET wordId=COALESCE(wordId,${wordId ? '?' : '(SELECT id FROM words WHERE canonicalArabic=? ORDER BY id LIMIT 1)'}) WHERE id=?`)
     .bind(wordId || arabicWord, requestId));
   if (francoArabicWord && !wordId) {
-    statements.push(db.prepare(`UPDATE words SET francoArabicWord=?,searchText=? WHERE id=(SELECT wordId FROM contribution_submissions WHERE id=?) AND (francoArabicWord IS NULL OR francoArabicWord='')`)
+    statements.push(prepareWrite(`UPDATE words SET francoArabicWord=?,searchText=? WHERE id=(SELECT wordId FROM contribution_submissions WHERE id=?) AND (francoArabicWord IS NULL OR francoArabicWord='')`)
       .bind(francoArabicWord, normalize(`${arabicWord} ${francoArabicWord}`), requestId));
   }
   for (const [script, values] of [['ar', input.arabicSpellings], ['franco', input.francoSpellings]] as const) {
-    for (const spelling of values) statements.push(db.prepare(`INSERT INTO word_spellings(wordId,userId,script,spelling,searchText,createdAt)
+    for (const spelling of values) statements.push(prepareWrite(`INSERT INTO word_spellings(wordId,userId,script,spelling,searchText,createdAt)
       SELECT wordId,?,?,?,?,? FROM contribution_submissions WHERE id=? ON CONFLICT(wordId,script,searchText) DO NOTHING`)
       .bind(userId, script, spelling, normalize(spelling), now, requestId));
   }
   for (const [isArabic, definition] of [[1, input.arabicDefinition], [0, input.englishDefinition]] as const) {
     if (!definition) continue;
-    statements.push(db.prepare(`INSERT INTO definitions(wordId,userId,countryCode,definition,example,arabicExample,isArabic,searchText,contributionPoints,submissionId)
+    statements.push(prepareWrite(`INSERT INTO definitions(wordId,userId,countryCode,definition,example,arabicExample,isArabic,searchText,contributionPoints,submissionId)
       SELECT s.wordId,?,?,?,?,?,?,?,1+CASE WHEN EXISTS(SELECT 1 FROM definitions d JOIN words w ON w.id=d.wordId WHERE w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=s.wordId)) THEN 0 ELSE 1 END,s.id
       FROM contribution_submissions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM definitions d WHERE d.submissionId=s.id AND d.isArabic=?)`)
       .bind(userId, countryCode, definition, input.francoExample, input.arabicExample, isArabic, normalize(definition), requestId, isArabic));
   }
-  statements.push(db.prepare('SELECT wordId FROM contribution_submissions WHERE id=?').bind(requestId));
-  statements.push(db.prepare('SELECT id FROM definitions WHERE submissionId=? ORDER BY id').bind(requestId));
+  statements.push(prepareWrite('SELECT wordId FROM contribution_submissions WHERE id=?').bind(requestId));
+  statements.push(prepareWrite('SELECT id FROM definitions WHERE submissionId=? ORDER BY id').bind(requestId));
   let result: D1Result<Row>[];
   try { result = await db.batch<Row>(statements); }
   catch (error) {

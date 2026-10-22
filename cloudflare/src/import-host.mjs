@@ -2,6 +2,8 @@
 // The same reviewed D1 importer is shared with the original R2 implementation.
 import {DurableObject} from 'cloudflare:workers';
 import {runCloudImport,publicStatus} from './import-cloud.mjs';
+import {READ_BUDGET_OBJECT} from './read-budget.ts';
+import {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION,validatePublicSeed} from './public-cache-keys.ts';
 import {IMPORT_MANIFEST,IMPORT_LIMITS} from './import-cloud-policy.mjs';
 import {fetchHostedFreeGuard} from '../scripts/hosted-free-guard.mjs';
 
@@ -101,6 +103,17 @@ async function isAuthorized(request,env){
   return crypto.subtle.timingSafeEqual(encoder.encode(supplied),encoder.encode(env.IMPORT_ADMIN_TOKEN));
 }
 const coordinator=env=>env.COORDINATOR.getByName(env.IMPORT_JOB_HASH);
+async function boundedJson(request,maxBytes) {
+  const size=Number(request.headers.get('Content-Length'));
+  if(size>maxBytes)throw Error('Request body is too large');
+  if(!request.body)throw Error('A JSON body is required');
+  const reader=request.body.getReader(),chunks=[];let bytes=0;
+  try {
+    for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>maxBytes){await reader.cancel();throw Error('Request body is too large');}chunks.push(value);}
+  } finally {reader.releaseLock();}
+  const all=new Uint8Array(bytes);let offset=0;for(const chunk of chunks){all.set(chunk,offset);offset+=chunk.byteLength;}
+  return JSON.parse(new TextDecoder().decode(all));
+}
 export default {
   async scheduled(controller,env,ctx){ctx.waitUntil(coordinator(env).tick('scheduled'));},
   async fetch(request,env){
@@ -109,6 +122,26 @@ export default {
     if(!await isAuthorized(request,env))return response({error:'Unauthorized'},401);
     const stub=coordinator(env);
     try {
+      if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
+      if(url.pathname==='/read-budget/reconcile'&&request.method==='POST') {
+        return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile(await boundedJson(request,1024)));
+      }
+      if(url.pathname==='/read-budget/reserve'&&request.method==='POST') {
+        const {id,rows}=await boundedJson(request,1024);
+        return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserve({id,rows,route:'maintenance:cli',tier:'import'}));
+      }
+      if(url.pathname==='/read-budget/settle'&&request.method==='POST') {
+        const {id,rowsRead,rowsWritten}=await boundedJson(request,1024);
+        if(typeof id!=='string'||(rowsRead!==null&&(!Number.isSafeInteger(rowsRead)||rowsRead<0))||!Number.isSafeInteger(rowsWritten)||rowsWritten<0)throw Error('Valid measured costs are required');
+        return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).settle(id,rowsRead,rowsWritten));
+      }
+      if(url.pathname==='/public-cache/revision'&&request.method==='GET')return response({revision:await env.PUBLIC_CACHE.getByName(PUBLIC_CACHE_REVISION).revision()});
+      if(url.pathname==='/public-cache/seed'&&request.method==='POST') {
+        const {key,value,revision}=await boundedJson(request,2_000_000);
+        if(typeof key!=='string'||!Number.isSafeInteger(revision)||revision<0)throw Error('A public resource key and revision are required');
+        validatePublicSeed(key,value);
+        return response(await env.PUBLIC_CACHE.getByName(PUBLIC_CACHE_PREFIX+key).seed(key,value,revision));
+      }
       if(url.pathname==='/status'&&request.method==='GET')return response(await stub.status());
       if(url.pathname==='/tick'&&request.method==='POST')return response(await stub.tick('manual'));
       if(url.pathname==='/arm'&&request.method==='POST'){

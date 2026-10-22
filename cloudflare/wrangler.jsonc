@@ -15,16 +15,22 @@
     "migrations_dir": "migrations"
   }],
   "durable_objects": {
-    "bindings": [{"name": "RUNTIME", "class_name": "QamousRuntime"}]
+    "bindings": [
+      {"name": "RUNTIME", "class_name": "QamousRuntime"},
+      {"name": "READ_BUDGET", "class_name": "QamousReadBudget"},
+      {"name": "PUBLIC_CACHE", "class_name": "QamousPublicCache"}
+    ]
   },
-  "migrations": [{"tag": "v1", "new_sqlite_classes": ["QamousRuntime"]}],
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["QamousRuntime"]},{"tag":"v2","new_sqlite_classes":["QamousReadBudget","QamousPublicCache"]}],
   "ai": {"binding": "AI"},
   "vars": {
     "APP_URL": "https://qamous.org",
     "ALLOWED_ORIGINS": "https://qamous.org,https://www.qamous.org",
     "AI_DAILY_LIMIT": "50",
     "EMAIL_DAILY_LIMIT": "30",
-    "ENABLE_AI": "true"
+    "ENABLE_AI": "true",
+    "READ_BUDGET_BOOTSTRAP_DAY": "2026-10-22",
+    "READ_BUDGET_BOOTSTRAP_ROWS": "6812838"
   },
-  "observability": {"enabled": true, "head_sampling_rate": 0.05, "logs": {"invocation_logs": false}}
+  "observability": {"enabled": true, "head_sampling_rate": 1, "logs": {"invocation_logs": false}}
 }
