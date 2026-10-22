@@ -16,9 +16,18 @@ const access=JSON.parse(await readFile(new URL('../private/cloud-import/access.j
 if(access.url!=='https://qamous-import.anthonyyoussef01.workers.dev'||typeof access.adminToken!=='string'||access.adminToken.length<32)throw Error('Approved importer access is unavailable');
 const headers={Authorization:'Bearer '+access.adminToken,'Content-Type':'application/json'};
 async function call(path,body) {
-  const response=await fetch(access.url+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30_000)});
-  if(!response.ok){await response.body?.cancel();throw Error('Private cache operation failed with HTTP '+response.status);}
-  return response.json();
+  // These operations only read metadata or replace the same public cache key.
+  // A lost acknowledgement can therefore be retried at the same revision.
+  for(let attempt=0;attempt<4;attempt++) {
+    let response;
+    try {response=await fetch(access.url+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30_000)});}
+    catch(error){if(attempt===3)throw error;await new Promise(resolve=>setTimeout(resolve,250*2**attempt));continue;}
+    if(response.ok)return response.json();
+    const details=(await response.text()).slice(0,500);
+    if(attempt===3||![400,429,500,502,503,504].includes(response.status)||/generation changed|private data|invalid public|too large/i.test(details))throw Error('Private cache operation failed with HTTP '+response.status+': '+details);
+    await new Promise(resolve=>setTimeout(resolve,250*2**attempt));
+  }
+  throw Error('Cache operation did not finish');
 }
 const current=await call('/public-cache/revision');
 if(current.revision!==revision)throw Error('Public content changed. Export a new snapshot at the current revision.');
