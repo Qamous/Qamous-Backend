@@ -14,7 +14,8 @@ import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
 import { verifyRagTurnstile } from './turnstile';
 import { seoIndex, seoShard, seoBucket, seoBrowse, seoRelated, seoDialect } from './seo';
-import { publicData, publicDataMany, publicMutationBarrier } from './public-cache';
+import { publicData, publicDataMany, publicMutationBarrier, refreshPublicMutation } from './public-cache';
+import { resolvePublicMutationScope } from './public-mutation-scope';
 import { exploreCacheKey, relatedKey, personalReactions, publicItemBuckets, publicItemsFromBuckets } from './public-data';
 export { QamousRuntime } from './runtime';
 export { QamousPublicCache } from './public-cache';
@@ -80,7 +81,13 @@ app.use('*',async(c,next)=>{
   const changesPublic=!['GET','HEAD','OPTIONS'].includes(c.req.method)&&(
     /^\/(?:contributions|posts|word(?:\/\d+)?|definitions(?:\/\d+)?|word-reports(?:\/\d+)?|definition-reports(?:\/\d+)?|countries(?:\/[A-Za-z]{2})?)$/.test(c.req.path)
     || (c.req.method==='DELETE' && /^\/users\/\d+$/.test(c.req.path)));
-  const barrier=changesPublic?publicMutationBarrier(original):undefined;
+  const scopeDb=changesPublic?guardD1(original.DB,original,{route:'cache:mutation-scope',tier:essential?'essential':'public'}):undefined;
+  let mutationBody:Row|undefined;
+  const resolveScope=async()=>{
+    mutationBody??=['POST','PATCH','PUT'].includes(c.req.method)?await body(c):{};
+    return resolvePublicMutationScope(scopeDb!,c.req.method,c.req.path,{...mutationBody,...c.get('publicMutationData')},c.get('user')?.id||null);
+  };
+  const barrier=changesPublic?publicMutationBarrier(original,resolveScope,keys=>refreshPublicMutation(original,keys)):undefined;
   c.env={...original,DB:guardD1(original.DB,original,{route:c.req.path,tier:essential?'essential':'public',beforeWrite:barrier?.beforeWrite,unknownWrite:barrier?.unknownWrite})};
   try {await next();} finally {await barrier?.finish();}
 });
@@ -242,11 +249,10 @@ app.get('/seo/word/:id',async c=>{
     // Optional discovery must never take the visible word offline when a
     // global read reservation is denied and these pools have not been cached.
     try {
-      const [countries,en,ar]=await Promise.all([
-        publicData<Row[]>(c.env,'countries'),
-        publicData<{results:Row[]}>(c.env,relatedKey(first.countryCode,'franco')),
-        publicData<{results:Row[]}>(c.env,relatedKey(first.countryCode,'ar')),
+      const relatedData=await publicDataMany<Row[]|{results:Row[]}>(c.env,[
+        'countries',relatedKey(first.countryCode,'franco'),relatedKey(first.countryCode,'ar'),
       ]);
+      const countries=relatedData[0] as Row[],en=relatedData[1] as {results:Row[]},ar=relatedData[2] as {results:Row[]};
       const links=[...new Map([...en.results,...ar.results].map(row=>[Number(row.wordId),row])).values()]
         .filter(row=>Number(row.wordId)!==id).slice(0,5);
       related={country:countries.find(country=>country.countryCode===first.countryCode)||null,
@@ -256,7 +262,16 @@ app.get('/seo/word/:id',async c=>{
   return c.json({rows,related});
 });
 app.post('/countries',async c=>{admin(c);const data=await body(c);const row=await c.env.DB.prepare('INSERT INTO countries(countryCode,countryName) VALUES(?,?) RETURNING *').bind(text(data.countryCode,'countryCode',2).toUpperCase(),text(data.countryName,'countryName')).first();return c.json(row,201);});
-app.patch('/countries/:code',async c=>{admin(c);const data=await body(c);await c.env.DB.prepare('UPDATE countries SET countryName=? WHERE countryCode=?').bind(text(data.countryName,'countryName'),c.req.param('code')).run();return c.json(changed);});
+app.patch('/countries/:code',async c=>{
+  admin(c);const data=await body(c),code=c.req.param('code');
+  const previous=await c.env.DB.prepare('SELECT countryName FROM countries WHERE countryCode=?').bind(code).first<{countryName:string}>();
+  if(!previous) throw new ApiError(404,'Country not found');
+  c.set('publicMutationData',{previousCountryName:previous.countryName});
+  const result=await c.env.DB.prepare('UPDATE countries SET countryName=? WHERE countryCode=? AND countryName=? COLLATE BINARY')
+    .bind(text(data.countryName,'countryName'),code,previous.countryName).run();
+  if(!result.meta.changes) throw new ApiError(409,'This country changed while you were editing it. Please try again.');
+  return c.json(changed);
+});
 app.delete('/countries/:code',async c=>{admin(c);await c.env.DB.prepare('DELETE FROM countries WHERE countryCode=?').bind(c.req.param('code')).run();return c.json(deleted);});
 
 app.get('/word/explore',async c=>{
@@ -292,6 +307,7 @@ app.get('/word/suggestions',async c=>{
 app.post('/contributions',async c=>{
   const user=requireUser(c.get('user'));await checkRate(c,'contribution',30,3600);
   const input=parseContribution(await body(c));
+  c.set('publicMutationData',input);
   const {requestId,...payload}=input;
   const result=await saveContribution(c.env.DB,user.id,input,await digest(JSON.stringify(payload)));
   queueEmbedding(c);return c.json(result,201);
@@ -310,6 +326,7 @@ app.post('/word',async c=>{
   const user=requireUser(c.get('user'));await checkRate(c,'add-word',30,3600);const data=await body(c);
   const arabic=text(data.arabicWord,'arabicWord'),franco=data.francoArabicWord?text(data.francoArabicWord,'francoArabicWord'):null;
   const existing=await c.env.DB.prepare('SELECT * FROM words WHERE arabicWord=? COLLATE NOCASE').bind(arabic).first();
+  c.set('publicMutationData',{...(existing?{wordId:existing.id}:{}),arabicWord:arabic});
   if(existing){if(!existing.francoArabicWord&&franco) await c.env.DB.prepare('UPDATE words SET francoArabicWord=?,searchText=? WHERE id=?').bind(franco,normalize(arabic+' '+franco),existing.id).run();return c.json(withoutSearch({...existing,francoArabicWord:existing.francoArabicWord||franco}));}
   const row=await c.env.DB.prepare('INSERT INTO words(userId,arabicWord,francoArabicWord,createdAt,searchText) VALUES(?,?,?,?,?) RETURNING *').bind(user.id,arabic,franco,nowSql(),normalize(arabic+' '+(franco||''))).first();
   return c.json(withoutSearch(row!),201);
@@ -320,7 +337,13 @@ app.patch('/word/:id',async c=>{
   if(!row) throw new ApiError(404,'Word not found');if(row.userId!==user.id) throw new ApiError(403,'Unauthorized');
   const arabic=data.arabicWord===undefined?String(row.arabicWord):text(data.arabicWord,'arabicWord');
   const f=data.francoArabicWord??data.FrancoArabicWord;const franco=f===undefined?row.francoArabicWord:(f?text(f,'francoArabicWord'):null);
-  await c.env.DB.prepare('UPDATE words SET arabicWord=?,francoArabicWord=?,searchText=? WHERE id=?').bind(arabic,franco,normalize(arabic+' '+(franco||'')),id).run();
+  c.set('publicMutationData',{wordId:id,arabicWord:arabic,previousArabicWord:String(row.arabicWord)});
+  // A second rename must not move the word out of a group that this request
+  // never observed or protected. Reject that stale edit rather than leaving a
+  // briefly joined group's cached aliases behind after both edits complete.
+  const result=await c.env.DB.prepare('UPDATE words SET arabicWord=?,francoArabicWord=?,searchText=? WHERE id=? AND arabicWord=? COLLATE BINARY')
+    .bind(arabic,franco,normalize(arabic+' '+(franco||'')),id,row.arabicWord).run();
+  if(!result.meta.changes) throw new ApiError(409,'This word changed while you were editing it. Please try again.');
   queueEmbedding(c);return c.json(changed);
 });
 
@@ -375,6 +398,7 @@ app.patch('/definitions/:id',async c=>{
   const user=requireUser(c.get('user')),id=positiveId(c.req.param('id')),data=await body(c);
   const row=await c.env.DB.prepare('SELECT * FROM definitions WHERE id=?').bind(id).first();
   if(!row) throw new ApiError(404,'Definition not found');if(row.userId!==user.id) throw new ApiError(403,'Unauthorized');
+  c.set('publicMutationData',{wordId:row.wordId});
   const definition=data.definition===undefined?String(row.definition):text(data.definition,'definition',10000),newExample=data.francoExample===undefined?data.example:data.francoExample,example=newExample===undefined?row.example:newExample?text(newExample,'example'):null;
   const arabicExample=data.arabicExample===undefined?row.arabicExample:data.arabicExample?text(data.arabicExample,'arabicExample'):null;
   await c.env.DB.prepare('UPDATE definitions SET definition=?,example=?,arabicExample=?,searchText=? WHERE id=?').bind(definition,example,arabicExample,normalize(definition),id).run();queueEmbedding(c);return c.json(changed);
@@ -383,6 +407,7 @@ app.delete('/definitions/:id',async c=>{
   const user=requireUser(c.get('user')),id=positiveId(c.req.param('id'));
   const row=await c.env.DB.prepare('SELECT * FROM definitions WHERE id=?').bind(id).first();
   if(!row) throw new ApiError(404,'Definition not found');if(row.userId!==user.id) throw new ApiError(403,'Unauthorized');
+  c.set('publicMutationData',{wordId:row.wordId});
   await c.env.DB.prepare('DELETE FROM definitions WHERE id=?').bind(id).run();queueEmbedding(c);return c.json(deleted);
 });
 function queueEmbedding(c:Context<AppContext>) {
@@ -428,7 +453,13 @@ for(const type of ['word','definition'] as const) {
   app.get(base,async c=>{admin(c);return c.json((await c.env.DB.prepare(`SELECT * FROM ${table}`).all()).results);});
   app.get(`${base}/word/:id`,async c=>{admin(c);if(type!=='word') throw new ApiError(404,'Route not found');return c.json((await c.env.DB.prepare(`SELECT * FROM ${table} WHERE wordId=?`).bind(positiveId(c.req.param('id'))).all()).results);});
   app.get(`${base}/:id`,async c=>{admin(c);return c.json(await c.env.DB.prepare(`SELECT * FROM ${table} WHERE id=?`).bind(positiveId(c.req.param('id'))).first());});
-  app.delete(`${base}/:id`,async c=>{admin(c);const id=positiveId(c.req.param('id'));await c.env.DB.batch([c.env.DB.prepare(`UPDATE ${targetTable} SET reportCount=MAX(0,reportCount-1) WHERE id=(SELECT ${column} FROM ${table} WHERE id=?)`).bind(id),c.env.DB.prepare(`DELETE FROM ${table} WHERE id=?`).bind(id)]);return c.json(deleted);});
+  app.delete(`${base}/:id`,async c=>{
+    admin(c);const id=positiveId(c.req.param('id'));
+    const report=await c.env.DB.prepare(`/* qamous-read:128 */ SELECT ${column} FROM ${table} WHERE id=?`).bind(id).first<Row>();
+    if(report)c.set('publicMutationData',{[column]:report[column]});
+    await c.env.DB.batch([c.env.DB.prepare(`UPDATE ${targetTable} SET reportCount=MAX(0,reportCount-1) WHERE id=(SELECT ${column} FROM ${table} WHERE id=?)`).bind(id),c.env.DB.prepare(`DELETE FROM ${table} WHERE id=?`).bind(id)]);
+    return c.json(deleted);
+  });
 }
 
 app.get('/posts',async c=>c.json(await publicData(c.env,'posts')));

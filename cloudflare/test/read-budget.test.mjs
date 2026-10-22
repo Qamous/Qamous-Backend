@@ -134,12 +134,15 @@ test('first/all/run/batch/session are metered including reads caused by writes; 
   assert.equal(raw.calls,5);f.db.close();
 });
 
-test('987 concurrent callers cannot race past persisted global reservations',async()=>{
+test('987 concurrent callers cannot race past persisted global reservations',{timeout:30_000},async()=>{
   const f=fixture();let release;
   const wait=new Promise(resolve=>release=resolve),raw=fakeD1({reads:20,wait}),env=environment(f.ledger);
   const work=Array.from({length:987},(_,n)=>guardD1(raw.db,env,{route:'/word/'+n,tier:'public'}).prepare('SELECT answer FROM sample').all());
-  // Attach rejection handlers before releasing simulated in-flight D1 queries.
-  const settled=Promise.allSettled(work);await new Promise(resolve=>setTimeout(resolve,1000));
+  // Hold the admitted queries until every other caller has exhausted its
+  // contention retries. A fixed sleep could release slots before late timers
+  // ran on a busy CI host, legitimately admitting more than the first four.
+  const denied=new Promise(resolve=>{let count=0;for(const promise of work) promise.catch(()=>{if(++count===987-READ_BUDGET_POLICY.publicConcurrent)resolve();});});
+  const settled=Promise.allSettled(work);await denied;
   assert.equal(raw.calls,4);assert.equal(f.ledger.status(start).usage.charged,200_000);
   release();const results=await settled;
   assert.equal(results.filter(r=>r.status==='fulfilled').length,4);assert.equal(f.ledger.status(start).usage.charged,80);

@@ -72,9 +72,9 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
     }
     catch(error) {
       if(submitted&&data.some(statement=>statement.writes))context.unknownWrite?.();
-      // No result is NOT evidence that D1 performed no work. Never refund an
-      // exception, a lost response or a request that died after its reservation.
-      try {await stub.settle(id,null);}catch { /* The persisted charge remains. */ }
+      // A pre-write scope/claim refusal is known to have submitted no SQL.
+      // Once submitted, a missing result retains its entire reservation.
+      try {await stub.settle(id,submitted?null:0);}catch { /* The persisted charge remains. */ }
       throw error;
     }
     const valid=results.length===statements.length&&results.every(result=>result.success===true&&Number.isSafeInteger(result.meta?.rows_read)&&result.meta.rows_read>=0&&Number.isSafeInteger(result.meta?.rows_written)&&result.meta.rows_written>=0);

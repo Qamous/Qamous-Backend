@@ -26,6 +26,9 @@ reads remain available while fresh D1 work is denied. A new installation needs
 an explicit current-day baseline; the October 22 deployment starts closed
 because that day's allowance was already exhausted.
 
+A scope/claim refusal before SQL submission settles at zero database rows.
+Once SQL is submitted, an unknown result retains its full reservation.
+
 ## Limits of the guarantee
 
 Pre-admission reservations and global concurrency are strict. A reservation is
@@ -55,9 +58,28 @@ pool for each visit, retaining its established weighted random behavior.
 Entries are fresh for 15 minutes and may serve their existing generation for
 up to 24 hours if a refresh is denied. A negative result lasts only five minutes
 and has no longer stale fallback. Moderation and published-text mutations start
-a durable barrier after budget admission and immediately before the SQL write.
-Pending or uncertain mutations block old snapshots; completion or lease expiry
-advances the generation. A denied mutation does not invalidate the cache.
+a durable, resource-specific barrier after budget admission and immediately
+before the SQL write. Word changes cover the old and new canonical spelling
+groups, their definition-card buckets, and affected discovery/sitemap resources.
+Blog changes cover posts only. Pending or uncertain mutations block only those
+resources; completion or lease expiry advances only their generations. An
+unrelated cached word stays available when public D1 reads are paused. A denied
+mutation does not invalidate the cache. Existing seeded records retain their
+generation until a matching mutation touches them.
+
+Active word claims reject a competing mutation touching the same word group;
+different words may still be edited concurrently even when their discovery
+collections overlap. An unknown write retains its claims through lease expiry.
+This prevents a concurrent rename from moving a pending deletion's content into
+an unprotected group. Renames also compare the previously read spelling/name
+in the SQL update and return a retryable conflict when it changed meanwhile.
+
+After a confirmed write, at most four word entries plus changed countries/posts
+may be rebuilt through the essential allowance. A refresh captures its resource
+versions before reading D1 and publishes only if no intervening mutation changed
+them. If that refresh is denied, only affected entries await a later refresh;
+removed content never falls back to its old generation. Discovery collections
+can temporarily be unavailable when their own necessary refresh is denied.
 Public HTML lasts at most 60 seconds. Explicit session cookies remain private;
 analytics cookies do not create avoidable cache misses.
 
@@ -94,8 +116,15 @@ capture the cache revision before exporting and stop if it changes. Today the
 already-exhausted read budget prevents intervening application writes.
 
 The seed endpoint is authenticated, size limited, refuses private fields and
-true personal reaction flags, and rejects a changed generation. It executes no
+true personal reaction flags, and rejects a changed export stamp or an active
+mutation. It stores each resource under its current individual generation. It executes no
 D1 SQL. The recovery snapshot does not restore logins or writes before the
 provider quota resets. Local regression checks replay 987 distributed requests,
 concurrent misses, unavailable coordinators, rollover, reservation failures,
 moderation generations, large bilingual contributions and account deletion.
+
+Durable Object requests, duration and storage have separate Free limits. The
+D1 admission ledger does not cap those quotas. Scoped snapshot checks use
+indexed, read-only queries unless a mutation lease actually expires, and the
+word SSR endpoint batches its optional discovery snapshot checks. This release
+does not claim to eliminate every Cloudflare quota or public-traffic outage.
