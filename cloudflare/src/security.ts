@@ -1,9 +1,9 @@
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
-import { ApiError, type UserRow } from './data';
+import { ApiError, type UserRow, type Row } from './data';
 
 export type AppBindings=Env & { LEGACY_PEPPER:string; PASSWORD_PEPPER:string; SESS_SECRET:string; RESET_SECRET:string; EMAIL_USERNAME:string; EMAIL_PASSWORD:string; TURNSTILE_SECRET:string; SEO_INTERNAL_SECRET?:string };
-export type AppContext={Bindings:AppBindings;Variables:{user:UserRow|null;sessionKey:string|null}};
+export type AppContext={Bindings:AppBindings;Variables:{user:UserRow|null;sessionKey:string|null;publicMutationData?:Row}};
 export const COOKIE='qamous_session';
 export const SESSION_TTL_SECONDS=30*24*60*60;
 // Renew at most once a day per session instead of writing on every API request.
