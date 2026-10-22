@@ -130,4 +130,15 @@ test('persistent login sessions in the local Workers/D1 runtime',async t=>{
     assert.equal((await db.prepare('SELECT userId FROM words WHERE id=?').bind(contributionWord).first()).userId,7);
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM definitions WHERE wordId=? AND userId=7').bind(contributionWord).first()).n,2);
   });
+  await t.test('a saved session keeps cached public browsing available when the D1 budget closes',async()=>{
+    assert.equal((await call('/countries')).status,200);
+    const bindings=await mf.getBindings();
+    await bindings.READ_BUDGET.getByName('qamous-d1-account-v1').reconcile({day:new Date().toISOString().slice(0,10),rowsRead:5_000_000,observedAt:new Date().toISOString()});
+    const response=await call('/countries',{cookie});
+    assert.equal(response.status,200,await response.clone().text());
+    assert.equal(response.headers.get('x-qamous-personalization'),'unavailable');
+    assert.equal(response.headers.get('set-cookie'),null);
+    assert.equal((await call('/auth/session',{cookie})).status,503);
+    assert.equal((await call('/contributions',{method:'POST',cookie,data:{}})).status,503);
+  });
 });

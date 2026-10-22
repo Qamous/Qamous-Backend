@@ -61,6 +61,11 @@ advances the generation. A denied mutation does not invalidate the cache.
 Public HTML lasts at most 60 seconds. Explicit session cookies remain private;
 analytics cookies do not create avoidable cache misses.
 
+If an existing session cannot be checked because the read guard is closed,
+cached public GET routes still return public content without personal reaction
+flags. The session cookie is retained. Account endpoints and mutations continue
+to return a temporary failure instead of assuming an authenticated identity.
+
 Google receives the same rendered content as visitors. Preserve the verified
 bot exemption in the zone's existing per-IP rule; do not add a user-agent budget
 bypass or a broad browser challenge. Canonical word/browse/dialect pages and

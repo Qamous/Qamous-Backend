@@ -68,7 +68,14 @@ app.use('*',async(c,next)=>{
   // runtime's shared env.DB binding or allow a route to retain an unguarded DB.
   const original=c.env;
   c.env={...original,DB:guardD1(original.DB,original,{route:'session',tier:'essential'})};
-  await loadSession(c);
+  try {await loadSession(c);} catch(error) {
+    // A saved session must not turn a cached public page into an outage when
+    // authentication cannot reach D1. Preserve its cookie and show public data
+    // without personal flags. Account endpoints and writes still fail closed.
+    const publicRead=['GET','HEAD'].includes(c.req.method)&&/^\/(?:seo\/|countries(?:\/|$)|posts$|sources$|word\/(?:explore|related)$|definitions\/(?:feed$|word\/\d+$))/.test(c.req.path);
+    if(!publicRead||!(error instanceof ReadBudgetError||quotaMessage(error as Error)))throw error;
+    c.set('user',null);c.set('sessionKey',null);c.header('X-Qamous-Personalization','unavailable');
+  }
   const essential=c.req.path.startsWith('/auth/')||c.req.path.startsWith('/users/reset-password')||(!['GET','HEAD','OPTIONS'].includes(c.req.method)&&!!c.get('user'));
   const changesPublic=!['GET','HEAD','OPTIONS'].includes(c.req.method)&&(
     /^\/(?:contributions|posts|word(?:\/\d+)?|definitions(?:\/\d+)?|word-reports(?:\/\d+)?|definition-reports(?:\/\d+)?|countries(?:\/[A-Za-z]{2})?)$/.test(c.req.path)
