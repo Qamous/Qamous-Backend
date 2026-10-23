@@ -140,7 +140,7 @@ test('legacy admitted queries consume the storage allowance during migration',()
   f.db.close();
 });
 
-test('refusals and status queries never write cleanup, expiry or UTC rollover rows',()=>{
+test('refusals never write cleanup or expiry and UTC rollover persists only one carry row',()=>{
   const f=fixture();
   for(let n=0;n<4;n++)assert.equal(f.ledger.reserve(claim(1),start).allowed,true);
   const before=f.db.prepare('SELECT total_changes() AS n').get().n;
@@ -152,9 +152,16 @@ test('refusals and status queries never write cleanup, expiry or UTC rollover ro
   assert.equal(f.ledger.reserve(claim(1),later).reason,'burn_rate');
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned,'expired leases stay untouched during denial');
   const tomorrow=Date.parse('2026-10-23T23:59:30Z');
+  assert.equal(f.ledger.status(tomorrow).usage.charged,4);
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned,'status preview is read only');
   assert.equal(f.ledger.reserve(claim(1),tomorrow).reason,'utc_rollover');
   assert.equal(f.ledger.status(tomorrow).usage.charged,4);
-  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned,'rollover preview/status is read only');
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned+1,'the first rollover refusal persists its conservative carry once');
+  for(let n=0;n<10;n++) {
+    const restarted=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+    assert.equal(restarted.reserve(claim(1),tomorrow).reason,'utc_rollover');
+  }
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned+1,'cold retries do not rewrite the carry');
   f.db.close();
 });
 
@@ -173,6 +180,30 @@ test('unknown settlement retries are idempotent and late settlements pay todays 
   const closed=f.db.prepare('SELECT total_changes() AS n').get().n;
   assert.equal(f.ledger.settle(other.id,10,0,tomorrow).reason,'do_storage_budget');
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,closed);
+  f.db.close();
+});
+
+test('rollover preview never replaces persisted counters and refreshes after meaningful mutations',()=>{
+  const f=fixture(),tomorrow=Date.parse('2026-10-23T12:00:00Z');
+  const first=f.ledger.reserve(claim(100),start);
+  assert.equal(f.ledger.status(tomorrow).usage.charged,100);
+  // An operation on the preview's source day changes its unresolved carry.
+  f.ledger.settle(first.id,20,0,start+1);
+  assert.equal(f.ledger.status(tomorrow).usage.charged,0);
+  const second=f.ledger.reserve(claim(200),start+2);
+  assert.equal(f.ledger.status(tomorrow).usage.charged,200);
+  f.ledger.settle(second.id,null,0,start+3);
+  assert.equal(f.ledger.status(tomorrow).usage.charged,200);
+  const next=f.ledger.reserve(claim(50),tomorrow);
+  assert.equal(next.allowed,true);
+  assert.equal(f.ledger.status(tomorrow).usage.charged,250);
+  assert.equal(f.ledger.status(tomorrow).usage.operations,1);
+  f.ledger.reconcile({day:'2026-10-23',rowsRead:4_500_000,observedAt:new Date(tomorrow).toISOString()},tomorrow);
+  assert.equal(f.ledger.reserve(claim(1),tomorrow).reason,'daily_budget');
+  assert.equal(f.ledger.status(tomorrow).usage.charged,4_500_000);
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(restart.reserve(claim(1),tomorrow).reason,'daily_budget');
+  assert.equal(restart.status(tomorrow).usage.operations,1);
   f.db.close();
 });
 

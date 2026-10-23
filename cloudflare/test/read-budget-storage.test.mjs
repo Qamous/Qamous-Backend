@@ -9,18 +9,31 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
     import {ReadBudgetLedger,READ_BUDGET_POLICY} from './src/read-budget-ledger.ts';
     const day='2026-10-22',now=Date.parse(day+'T12:00:00Z');
     export class MeasuredLedger extends DurableObject {
-      writes=0;events=[];ledger;
+      writes=0;reads=0;events=[];ledger;store;
       constructor(ctx,env) {
         super(ctx,env);
         const store={sql:{exec:(query,...args)=>{
-          const cursor=ctx.storage.sql.exec(query,...args),rows=[...cursor];this.writes+=cursor.rowsWritten;
+          const cursor=ctx.storage.sql.exec(query,...args),rows=[...cursor];this.writes+=cursor.rowsWritten;this.reads+=cursor.rowsRead;
           return {toArray:()=>rows,one:()=>{if(rows.length!==1)throw Error('Expected one row');return rows[0];}};
         }},transactionSync:callback=>ctx.storage.transactionSync(callback)};
-        this.ledger=new ReadBudgetLedger(store,{day,rows:0},event=>this.events.push(event));
+        this.store=store;this.ledger=new ReadBudgetLedger(store,{day,rows:0},event=>this.events.push(event));
       }
       run(scenario) {
         const sql=this.ctx.storage.sql,ledger=this.ledger;
         const claim=(id,tier='public')=>({id:'request-'+id,rows:1,route:'/measured',tier});
+        if(scenario==='rollover-denials') {
+          for(let n=0;n<1500;n++)sql.exec("INSERT INTO read_budget_leases(id,day,tier,route,reserved,started,minute,status) VALUES(?,?,'public','/old',3000,?,?,'unknown')",'old-'+n,day,now,Math.floor(now/60000));
+          const beforeReads=this.reads,beforeWrites=this.writes,tomorrow=now+86400000;
+          for(let n=0;n<1000;n++)if(ledger.reserve(claim('rollover-'+n),tomorrow).reason!=='daily_budget')throw Error('Carry bypass');
+          const deniedReads=this.reads-beforeReads;
+          for(let n=0;n<1000;n++)if(ledger.status(tomorrow).usage.charged!==4500000)throw Error('Carry changed');
+          const statusReads=this.reads-beforeReads-deniedReads,restartReads=this.reads,restartWrites=this.writes;
+          for(let n=0;n<1000;n++) {
+            const restarted=new ReadBudgetLedger(this.store,{day,rows:0},()=>{});
+            if(restarted.reserve(claim('restart-'+n),tomorrow).reason!=='daily_budget')throw Error('Restart bypass');
+          }
+          return {scenario,deniedReads,statusReads,writes:restartWrites-beforeWrites,restartReads:this.reads-restartReads,restartWrites:this.writes-restartWrites};
+        }
         if(scenario==='worst-cleanup') {
           sql.exec('INSERT INTO read_budget_days(day,charged) VALUES(?,0)','2026-10-16');
           sql.exec("INSERT INTO read_budget_leases(id,day,tier,route,reserved,started,minute,status) VALUES('old-lease','2026-10-16','public','/old',1,1,1,'settled')");
@@ -65,4 +78,11 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
   const capped=await response.json();t.diagnostic(JSON.stringify(capped));
   assert.equal(capped.denialWrites,0);assert.equal(capped.operations,2000);
   assert.ok(capped.writes<=capped.operations*capped.policy.ledgerRowsPerOperation);
+  const rolloverResponse=await mf.dispatchFetch('https://local/rollover-denials');assert.equal(rolloverResponse.status,200,await rolloverResponse.clone().text());
+  const rollover=await rolloverResponse.json();t.diagnostic(JSON.stringify(rollover));
+  assert.ok(rollover.deniedReads<=5000,'a historical carry scan must not repeat for each denial');
+  assert.ok(rollover.statusReads<=5000,'status polling must reuse the same conservative rollover preview');
+  assert.ok(rollover.writes<=2,'rollover may insert only its one durable carry row');
+  assert.ok(rollover.restartReads<=25_000,'cold refusals must not rescan historical leases');
+  assert.equal(rollover.restartWrites,0);
 });

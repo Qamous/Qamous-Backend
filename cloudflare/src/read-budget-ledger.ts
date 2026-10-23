@@ -25,6 +25,7 @@ export class ReadBudgetLedger {
   private deniedDay='';
   private deniedCount=0;
   private denialEvents=new Map<string,number>();
+  private rolloverPreview:{day:string;priorDay:string;carry:number}|undefined;
   constructor(store:Store,bootstrap:{day?:string;rows?:number},emit:(event:Record<string,unknown>)=>void=event=>console.log(JSON.stringify(event))) {
     this.store=store;this.emit=emit;
     const sql=store.sql;
@@ -49,14 +50,26 @@ export class ReadBudgetLedger {
   private current(now:number,persist=true):Day|null {
     const sql=this.store.sql,day=dayAt(now);
     let current=sql.exec<Day>('SELECT * FROM read_budget_days WHERE day=?',day).toArray()[0];
-    if(current)return current;
+    if(current) {
+      if(this.rolloverPreview?.day===day)this.rolloverPreview=undefined;
+      return current;
+    }
     // A new installation has no authority to assume zero usage mid-day. It
     // needs an explicit baseline. Later UTC days can start from zero plus any
     // unresolved previous-day work, which is deliberately double charged.
-    const prior=sql.exec<Day>('SELECT * FROM read_budget_days WHERE day<? ORDER BY day DESC LIMIT 1',day).toArray()[0];
-    if(!prior)return null;
-    const carry=Number(sql.exec('SELECT COALESCE(SUM(reserved),0) AS n FROM read_budget_leases WHERE day=? AND status IN (\'pending\',\'unknown\')',prior.day).one().n);
+    let preview=this.rolloverPreview;
+    if(preview?.day!==day) {
+      const prior=sql.exec<Day>('SELECT * FROM read_budget_days WHERE day<? ORDER BY day DESC LIMIT 1',day).toArray()[0];
+      if(!prior)return null;
+      const carry=Number(sql.exec('SELECT COALESCE(SUM(reserved),0) AS n FROM read_budget_leases WHERE day=? AND status IN (\'pending\',\'unknown\')',prior.day).one().n);
+      preview={day,priorDay:prior.day,carry};this.rolloverPreview=preview;
+    }
+    // Read-only status previews reuse this carry until a meaningful mutation.
+    // Reservations persist it once, even if refused, so a cold object cannot
+    // rescan yesterday's leases on every denied request after an eviction.
+    const carry=preview.carry;
     if(!persist)return {day,charged:carry,baseline:carry,measured:0,denied:0,tripped:null,alerted:0,operations:0};
+    this.rolloverPreview=undefined;
     sql.exec('INSERT INTO read_budget_days(day,charged,baseline) VALUES(?,?,?)',day,carry,carry);
     current=sql.exec<Day>('SELECT * FROM read_budget_days WHERE day=?',day).one();
     return current;
@@ -101,7 +114,9 @@ export class ReadBudgetLedger {
   reserve(input:Reservation,now=Date.now()):Admission {
     if(!input||!['public','essential','import'].includes(input.tier)||typeof input.route!=='string'||typeof input.id!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.id)||!validInteger(input.rows)||input.rows<1||input.rows>READ_BUDGET_POLICY.maxReservationRows) return {allowed:false,reason:'invalid_reservation',retryAfter:60};
     return this.store.transactionSync(()=>{
-      const sql=this.store.sql,day=dayAt(now),minute=Math.floor(now/60_000),route=safeRoute(input.route),row=this.current(now,false);
+      // One bounded carry-row insert at UTC rollover is allowed even on a
+      // refusal. All later refusals are read only, including across restarts.
+      const sql=this.store.sql,day=dayAt(now),minute=Math.floor(now/60_000),route=safeRoute(input.route),row=this.current(now);
       const prior=sql.exec<Lease>('SELECT * FROM read_budget_leases WHERE id=?',input.id).toArray()[0];
       if(prior)return {allowed:false,reason:'replayed_reservation',retryAfter:60};
       const deny=(reason:string,retryAfter=60)=>this.deny(day,route,input.tier,reason,retryAfter,row);
@@ -123,7 +138,7 @@ export class ReadBudgetLedger {
       const window=sql.exec('SELECT charged,essential FROM read_budget_minutes WHERE minute=?',minute).toArray()[0]||{charged:0,essential:0};
       const burnCeiling=READ_BUDGET_POLICY.minuteRows+(input.tier==='essential'?READ_BUDGET_POLICY.essentialMinuteRows:0);
       if(Number(window.charged)+input.rows>burnCeiling)return deny('burn_rate',60-now/1000%60|0||1);
-      this.current(now);
+      this.rolloverPreview=undefined;
       sql.exec('INSERT OR IGNORE INTO read_budget_minutes(minute) VALUES(?)',minute);
       sql.exec('INSERT INTO read_budget_leases(id,day,tier,route,reserved,started,minute,status) VALUES(?,?,?,?,?,?,?,\'pending\')',input.id,day,input.tier,route,input.rows,now,minute);
       sql.exec('UPDATE read_budget_days SET charged=charged+?,operations=operations+1 WHERE day=?',input.rows,day);
@@ -153,6 +168,7 @@ export class ReadBudgetLedger {
         sql.exec('UPDATE read_budget_days SET operations=operations+1 WHERE day=?',dayAt(now));
         this.alerts(dayAt(now));
       }
+      this.rolloverPreview=undefined;
       if(unknown) {
         sql.exec('UPDATE read_budget_leases SET status=\'unknown\' WHERE id=?',id);
         sql.exec('UPDATE read_budget_routes SET unknown=unknown+1 WHERE day=? AND route=? AND tier=?',lease.day,lease.route,lease.tier);
@@ -182,6 +198,7 @@ export class ReadBudgetLedger {
     return this.store.transactionSync(()=>{
       const sql=this.store.sql;
       const row=this.current(now);
+      this.rolloverPreview=undefined;
       if(!row)sql.exec('INSERT INTO read_budget_days(day,charged,baseline) VALUES(?,?,?)',input.day,input.rowsRead,input.rowsRead);
       else if(input.rowsRead>row.charged)sql.exec('UPDATE read_budget_days SET baseline=baseline+?,charged=? WHERE day=?',input.rowsRead-row.charged,input.rowsRead,input.day);
       this.alerts(input.day);
