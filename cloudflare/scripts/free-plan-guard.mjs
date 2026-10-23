@@ -2,6 +2,20 @@ import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const ACCOUNT_ID='39292a971f28b413619657e9f2c77003';
+export function validateReadProtection(config) {
+  const rate=config.ratelimits;
+  if(!Array.isArray(rate)||rate.length!==1||rate[0].name!=='PUBLIC_READ_RATE_LIMIT'||rate[0].namespace_id!=='20261023'
+    ||rate[0].simple?.limit!==120||rate[0].simple?.period!==60) throw new Error('Deployment refused: unexpected native public read rate limiter');
+  if(!['true','false'].includes(config.vars?.PUBLIC_READ_ONLY)) throw new Error('Deployment refused: explicit public snapshot pause setting is required');
+  return true;
+}
+export function validateImportPause(config,schedules) {
+  if(!['true','false'].includes(config.vars?.PUBLIC_READ_ONLY)) throw new Error('Deployment refused: explicit importer snapshot pause setting is required');
+  const paused=config.vars.PUBLIC_READ_ONLY==='true',expected=paused?[]:['* * * * *'];
+  if(JSON.stringify(config.triggers?.crons)!==JSON.stringify(expected)) throw new Error('Deployment refused: importer schedule does not match its pause setting');
+  if(arguments.length>1&&(!Array.isArray(schedules)||JSON.stringify(schedules.map(item=>item?.cron))!==JSON.stringify(expected))) throw new Error('Deployment refused: live importer schedule does not match its pause setting');
+  return paused;
+}
 export function validateProof(proof, now=Date.now()) {
   if(proof.accountId!==ACCOUNT_ID||proof.plan!=='Workers Free'||proof.status!=='Active') throw new Error('Deployment refused: Workers Free must be Active in the approved account');
   if(!proof.evidence?.includes('Workers Free Active')) throw new Error('Deployment refused: missing verified billing evidence');
@@ -18,6 +32,7 @@ export async function verifyFreePlan() {
   const blocked=['r2_buckets','vectorize','hyperdrive','containers','queues','workflows','pipelines','dispatch_namespaces'];
   if(blocked.some(k=>config[k])) throw new Error('Deployment refused: a paid or unapproved binding was found');
   if(config.triggers?.crons?.length) throw new Error('Deployment refused: unexpected background schedules');
+  validateReadProtection(config);
   if(config.ai?.binding!=='AI'||config.durable_objects?.bindings?.[0]?.class_name!=='QamousRuntime') throw new Error('Deployment refused: unexpected bindings');
   if(config.d1_databases?.length!==1||config.d1_databases[0].database_id!=='d0587244-4f3d-4209-b246-55cefbce7555') throw new Error('Deployment refused: database is not the approved Qamous database');
   if(config.vars.AI_DAILY_LIMIT!=='50'||config.vars.EMAIL_DAILY_LIMIT!=='30') throw new Error('Deployment refused: quota caps changed');

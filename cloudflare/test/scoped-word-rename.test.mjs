@@ -50,6 +50,7 @@ test('overlapping renames produce one conflict and preserve the winning canonica
   const bundled=await build({stdin:{contents:entry,resolveDir:fileURLToPath(new URL('..',import.meta.url)),loader:'ts'},bundle:true,write:false,
     format:'esm',platform:'node',target:'es2022',external:['cloudflare:workers','cloudflare:sockets']});
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:bundled.outputFiles[0].text,
+    ratelimits:{PUBLIC_READ_RATE_LIMIT:{namespace_id:'20261023',simple:{limit:120,period:60}}},
     compatibilityDate:'2026-10-16',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],
     durableObjects:{RUNTIME:{className:'QamousRuntime',useSQLite:true},READ_BUDGET:{className:'QamousReadBudget',useSQLite:true},PUBLIC_CACHE:{className:'QamousPublicCache',useSQLite:true}},
     bindings:{SESS_SECRET:'rename-test-session-secret',PASSWORD_PEPPER:'rename-test-password-pepper',RESET_SECRET:'rename-test-reset-secret',

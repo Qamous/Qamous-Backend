@@ -57,3 +57,13 @@ export async function checkRate(c:Context<AppContext>,action:string,limit:number
   const allowed=await runtime(c.env,`rate:${scope}`).allow(scope,limit,seconds);
   if(!allowed) {c.header('Retry-After',String(seconds));throw new ApiError(429,'Too many requests. Please try again later.');}
 }
+
+// The existing public-read binding also filters dynamic writes before session
+// loading. It is an abuse filter, not a global quota or an identity check.
+export async function checkPublicReadRate(c:Context<AppContext>) {
+  const key=await digest('read-api:'+(c.req.header('cf-connecting-ip')||'local'));
+  let allowed:boolean;
+  try {allowed=(await c.env.PUBLIC_READ_RATE_LIMIT.limit({key})).success;}
+  catch {c.header('Retry-After','60');throw new ApiError(503,'The dictionary is temporarily busy. Please try again shortly.');}
+  if(!allowed) {c.header('Retry-After','60');throw new ApiError(429,'Too many requests. Please try again later.');}
+}

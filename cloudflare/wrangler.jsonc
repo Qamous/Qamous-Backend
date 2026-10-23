@@ -8,6 +8,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{"pattern":"api.qamous.org","custom_domain":true}],
+  "ratelimits": [{"name":"PUBLIC_READ_RATE_LIMIT","namespace_id":"20261023","simple":{"limit":120,"period":60}}],
   "d1_databases": [{
     "binding": "DB",
     "database_name": "qamous",
@@ -29,6 +30,7 @@
     "AI_DAILY_LIMIT": "50",
     "EMAIL_DAILY_LIMIT": "30",
     "ENABLE_AI": "true",
+    "PUBLIC_READ_ONLY": "true",
     "READ_BUDGET_BOOTSTRAP_DAY": "2026-10-22",
     "READ_BUDGET_BOOTSTRAP_ROWS": "6812838"
   },

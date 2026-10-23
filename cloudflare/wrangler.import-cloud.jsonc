@@ -43,11 +43,10 @@
     }
   ],
   "triggers": {
-    "crons": [
-      "* * * * *"
-    ]
+    "crons": []
   },
   "vars": {
+    "PUBLIC_READ_ONLY": "true",
     "FREE_PLAN_BASELINE": "{\"accountId\":\"39292a971f28b413619657e9f2c77003\",\"plan\":\"Workers Free\",\"status\":\"Active\",\"source\":\"cloudflare_dashboard\",\"observedAt\":\"2026-10-20T17:29:04.252021+00:00\",\"url\":\"https://dash.cloudflare.com/39292a971f28b413619657e9f2c77003/billing/subscriptions\",\"evidence\":\"Workers Free Active; No payment method on file. Observed signed-in Cloudflare subscriptions dashboard before example alignment migration and release.\"}",
     "IMPORT_JOB_HASH": "9be026f8db117408ec72fed931749d6531744d4369cdbe7eeb77e0ed991c7fe5"
   },

@@ -20,12 +20,17 @@ export function chatbotLimitResponse(blocked:string,day:string,caller:ChatbotCal
 }
 export function claimBudget(storage:BudgetStorage,scope:string,limit:number,seconds:number,now=Math.floor(Date.now()/1000)):boolean {
   if(!Number.isSafeInteger(limit)||limit<1||!Number.isSafeInteger(seconds)||seconds<1) return false;
+  // Rejected traffic must not keep incrementing a persisted counter or trigger
+  // cleanup. This synchronous path cannot interleave within its Durable Object.
+  const current=storage.exec('SELECT used,reset FROM rate_limits WHERE scope=?',scope).toArray()[0];
+  if(current&&Number(current.reset)>now&&Number(current.used)>=limit) return false;
   const rows=storage.exec(
-    'INSERT INTO rate_limits(scope,used,reset) VALUES(?,1,?) ON CONFLICT(scope) DO UPDATE SET used=CASE WHEN reset<=? THEN 1 ELSE used+1 END,reset=CASE WHEN reset<=? THEN ? ELSE reset END RETURNING used,reset',
-    scope,now+seconds,now,now,now+seconds,
+    'INSERT INTO rate_limits(scope,used,reset) VALUES(?,1,?) ON CONFLICT(scope) DO UPDATE SET used=CASE WHEN reset<=? THEN 1 ELSE used+1 END,reset=CASE WHEN reset<=? THEN ? ELSE reset END WHERE reset<=? OR used<? RETURNING used,reset',
+    scope,now+seconds,now,now,now+seconds,now,limit,
   ).toArray();
-  storage.exec('DELETE FROM rate_limits WHERE reset<?',now-86400);
-  return Number(rows[0].used)<=limit;
+  if(!rows.length) return false;
+  storage.exec('DELETE FROM rate_limits WHERE scope IN (SELECT scope FROM rate_limits WHERE reset<? LIMIT 128)',now-86400);
+  return true;
 }
 
 // Call inside one SQLite transaction so a denied caller cannot consume any

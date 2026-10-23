@@ -115,11 +115,13 @@ async function boundedJson(request,maxBytes) {
   return JSON.parse(new TextDecoder().decode(all));
 }
 export default {
-  async scheduled(controller,env,ctx){ctx.waitUntil(coordinator(env).tick('scheduled'));},
+  async scheduled(controller,env,ctx){if(env.PUBLIC_READ_ONLY==='true')return;ctx.waitUntil(coordinator(env).tick('scheduled'));},
   async fetch(request,env){
     const url=new URL(request.url);
     if(url.pathname==='/health'&&request.method==='GET')return response({service:'qamous-import',version:2,staging:'Free SQLite Durable Object',configured:/^[a-f0-9]{64}$/.test(env.IMPORT_JOB_HASH)});
     if(!await isAuthorized(request,env))return response({error:'Unauthorized'},401);
+    if(env.PUBLIC_READ_ONLY==='true')return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
+      {status:503,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Retry-After':'60'}});
     const stub=coordinator(env);
     try {
       if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
