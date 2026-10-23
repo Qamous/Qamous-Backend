@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';
 import { ApiError, type Row, type UserRow, type DictionaryRow, text, positiveId, normalize, escapeLike, nowSql, publicUser, requireUser, rankedSql, personalJoinWord, withWord, withSpellings, spellingColumns } from './data';
-import { loadSession, createSession, logout, runtime, checkRate, digest, token, type AppContext } from './security';
+import { loadSession, createSession, logout, runtime, checkRate, checkPublicReadRate, digest, token, type AppContext } from './security';
 import { trustedSeoRead } from './seo-trust';
 import { guardD1,ReadBudgetError } from './read-budget';
 import { countryCodes } from '../../src/utils/country-codes';
@@ -61,10 +61,21 @@ app.use('*',bodyLimit({maxSize:32768,onError:c=>c.json({message:'Request body is
 app.use('*',cors({origin:(origin,c)=>c.env.ALLOWED_ORIGINS.split(',').includes(origin)?origin:undefined,credentials:true,allowMethods:['GET','POST','PATCH','DELETE','PUT','OPTIONS'],allowHeaders:['Content-Type','Authorization']}));
 app.use('*',async(c,next)=>{
   validateWriteRequest(c.req.method,c.req.raw.headers,c.env.ALLOWED_ORIGINS.split(','));
+  // These responses require no identity or storage, including for a visitor
+  // carrying an old cookie while the Durable Objects allowance is exhausted.
+  if(['GET','HEAD'].includes(c.req.method)&&['/','/robots.txt'].includes(c.req.path)) {await next();return;}
+  // A published static snapshot is authoritative during recovery. Stop before
+  // every rate-limit, session, database or cache binding; writes cannot race a
+  // snapshot whose moderation state is no longer being checked per request.
+  if(c.env.PUBLIC_READ_ONLY==='true') {
+    c.header('Retry-After','60');
+    return c.json({statusCode:503,code:'PUBLIC_READ_ONLY',message:'Account features and changes are temporarily unavailable. You can continue browsing the dictionary.'},503);
+  }
   // Keep the deployed read API bounded per client, including workers.dev where
-  // zone WAF rules do not run. This is not a claim of scraper-proof public data.
+  // zone WAF rules do not run. Native counters use no Durable Object storage;
+  // they are approximate per location, separate from strict D1 admission.
   if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)&&!isImportPreview(c.req.url,c.env)
-    &&!trustedSeoRead(c.req.path,c.req.header('x-qamous-seo-internal'),c.env.SEO_INTERNAL_SECRET)) await checkRate(c,'read-api',120,60);
+    &&!trustedSeoRead(c.req.path,c.req.header('x-qamous-seo-internal'),c.env.SEO_INTERNAL_SECRET)) await checkPublicReadRate(c);
   // Hono owns this context. Replace its bindings object; never mutate the
   // runtime's shared env.DB binding or allow a route to retain an unguarded DB.
   const original=c.env;

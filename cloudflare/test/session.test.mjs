@@ -14,6 +14,7 @@ test('persistent login sessions in the local Workers/D1 runtime',async t=>{
   const bundled=await build({entryPoints:[fileURLToPath(new URL('../src/index.ts',import.meta.url))],bundle:true,write:false,
     format:'esm',platform:'node',target:'es2022',external:['cloudflare:workers','cloudflare:sockets']});
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:bundled.outputFiles[0].text,
+    ratelimits:{PUBLIC_READ_RATE_LIMIT:{namespace_id:'20261023',simple:{limit:120,period:60}}},
     compatibilityDate:'2026-10-16',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],
     durableObjects:{RUNTIME:{className:'QamousRuntime',useSQLite:true},READ_BUDGET:{className:'QamousReadBudget',useSQLite:true},PUBLIC_CACHE:{className:'QamousPublicCache',useSQLite:true}},
     bindings:{SESS_SECRET:'synthetic-session-secret',PASSWORD_PEPPER:'synthetic-password-pepper',RESET_SECRET:'synthetic-reset-secret',
