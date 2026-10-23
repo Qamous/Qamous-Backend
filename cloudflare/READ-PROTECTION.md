@@ -93,10 +93,18 @@ threshold alerts used 23. A 2,000-operation run used 24,004 written rows, and
 1,000 subsequent denials wrote zero. Recheck these measurements when changing
 the ledger schema or lifecycle.
 
-Denied reservations, repeated unknown settlements, status calls and refused
-rollovers do not write denial counters or expire leases. Denial counts and log
-throttles are volatile; they reset when the object restarts. Admitted operations
-remove at most one old row from each ledger table. A settlement from a previous
+Denied reservations do not write per-attempt counters, expire leases or clean up
+history. The first valid reservation after UTC rollover may insert one durable
+day row carrying unresolved reservations, even when that request is refused.
+Persisting this carry prevents repeated refusals from rescanning yesterday's
+leases after an object restarts. With 1,500 historical unresolved leases, 1,000
+rollover refusals used 2,501 rows read and two rows written; another 1,000 refusals
+from newly constructed ledger instances used 1,000 reads and zero writes.
+Read-only status previews memoize their conservative carry until a meaningful
+mutation, while persisted current-day counters always take precedence.
+Repeated unknown settlements and status calls remain read only. Denial counts
+and log throttles are volatile; they reset when the object restarts. Admitted
+operations remove at most one old row from each ledger table. A settlement from a previous
 UTC day must consume a new operation unit before updating stored accounting;
 when refused, it retains its original D1 reservation. Existing query totals
 initialize the new counter so deploying this protection cannot reset usage.
