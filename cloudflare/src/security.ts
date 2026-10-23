@@ -58,8 +58,8 @@ export async function checkRate(c:Context<AppContext>,action:string,limit:number
   if(!allowed) {c.header('Retry-After',String(seconds));throw new ApiError(429,'Too many requests. Please try again later.');}
 }
 
-// Anonymous reads must never spend a persisted write just to decide whether
-// they are allowed. The native binding is an abuse filter, not a global quota.
+// The existing public-read binding also filters dynamic writes before session
+// loading. It is an abuse filter, not a global quota or an identity check.
 export async function checkPublicReadRate(c:Context<AppContext>) {
   const key=await digest('read-api:'+(c.req.header('cf-connecting-ip')||'local'));
   let allowed:boolean;

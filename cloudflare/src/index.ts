@@ -71,11 +71,11 @@ app.use('*',async(c,next)=>{
     c.header('Retry-After','60');
     return c.json({statusCode:503,code:'PUBLIC_READ_ONLY',message:'Account features and changes are temporarily unavailable. You can continue browsing the dictionary.'},503);
   }
-  // Keep the deployed read API bounded per client, including workers.dev where
-  // zone WAF rules do not run. Native counters use no Durable Object storage;
-  // they are approximate per location, separate from strict D1 admission.
-  if(['GET','HEAD'].includes(c.req.method)&&!['/','/auth/health','/robots.txt'].includes(c.req.path)&&!isImportPreview(c.req.url,c.env)
-    &&!trustedSeoRead(c.req.path,c.req.header('x-qamous-seo-internal'),c.env.SEO_INTERNAL_SECRET)) await checkPublicReadRate(c);
+  // Apply the native abuse filter before identity/storage for every method,
+  // including authenticated requests and rejected login/write retries. These
+  // approximate counters are separate from strict per-action and D1 limits.
+  const trustedRead=['GET','HEAD'].includes(c.req.method)&&trustedSeoRead(c.req.path,c.req.header('x-qamous-seo-internal'),c.env.SEO_INTERNAL_SECRET);
+  if(!isImportPreview(c.req.url,c.env)&&!trustedRead) await checkPublicReadRate(c);
   // Hono owns this context. Replace its bindings object; never mutate the
   // runtime's shared env.DB binding or allow a route to retain an unguarded DB.
   const original=c.env;

@@ -77,4 +77,12 @@ test('snapshot pause and native read limiting work while every database and Dura
     assert.equal(rejected.status,503);assert.equal(rejected.headers.get('Retry-After'),'60');
     assert.deepEqual(await (await call('/__touches')).json(),{touches:0});
   });
+  await t.test('exhausted native quota rejects every method and old cookies before session or action limits',async()=>{
+    for(const [method,path] of [['POST','/auth/login'],['POST','/users/register'],['POST','/auth/logout'],['PATCH','/word/1'],
+      ['DELETE','/definitions/1'],['GET','/auth/health'],['HEAD','/countries']]) {
+      const result=await call(path,{method,mode:'native',cookie:true});
+      assert.equal(result.status,429,method+' '+path);assert.equal(result.headers.get('Retry-After'),'60');
+    }
+    assert.deepEqual(await (await call('/__touches')).json(),{touches:0});
+  });
 });

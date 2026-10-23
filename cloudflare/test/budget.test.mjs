@@ -5,8 +5,35 @@ import {claimBudget,claimBudgetSet,chatbotBudgetClaims,chatbotLimitResponse} fro
 function storage() {
   const db=new DatabaseSync(':memory:');
   db.exec('CREATE TABLE rate_limits(scope TEXT PRIMARY KEY,used INTEGER NOT NULL,reset INTEGER NOT NULL)');
-  return {db,exec(query,...args){return {toArray(){return db.prepare(query).all(...args);}};}};
+  const statements=[];
+  return {db,statements,exec(query,...args){statements.push(query);const rows=db.prepare(query).all(...args);return {toArray(){return rows;}};}};
 }
+test('blocked retries never issue mutations, grow counters or delete expired rows',()=>{
+  const sql=storage();
+  assert.equal(claimBudget(sql,'login',5,300,100_000),true);
+  for(let n=1;n<5;n++)assert.equal(claimBudget(sql,'login',5,300,100_000),true);
+  sql.db.prepare('INSERT INTO rate_limits VALUES(?,?,?)').run('expired',1,1);
+  const before=sql.db.prepare('SELECT total_changes() AS n').get().n;
+  sql.statements.length=0;
+  for(let n=0;n<1000;n++)assert.equal(claimBudget(sql,'login',5,300,100_001),false);
+  assert.equal(sql.db.prepare('SELECT total_changes() AS n').get().n,before);
+  assert.equal(sql.db.prepare('SELECT used FROM rate_limits WHERE scope=?').get('login').used,5);
+  assert.ok(sql.db.prepare('SELECT scope FROM rate_limits WHERE scope=?').get('expired'));
+  assert.ok(sql.statements.every(query=>query.startsWith('SELECT ')));
+  assert.equal(claimBudget(sql,'login',5,300,100_300),true);
+  assert.deepEqual({...sql.db.prepare('SELECT used,reset FROM rate_limits WHERE scope=?').get('login')},{used:1,reset:100_600});
+  sql.db.close();
+});
+test('accepted cleanup has a fixed row bound even after long inactivity',()=>{
+  const sql=storage();
+  const insert=sql.db.prepare('INSERT INTO rate_limits VALUES(?,?,?)');
+  for(let n=0;n<300;n++)insert.run('expired:'+n,1,1);
+  assert.equal(claimBudget(sql,'active',1,60,100_000),true);
+  assert.equal(sql.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE scope LIKE ?').get('expired:%').n,172);
+  assert.equal(claimBudget(sql,'active',1,60,100_001),false);
+  assert.equal(sql.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE scope LIKE ?').get('expired:%').n,172);
+  sql.db.close();
+});
 test('AI request 51 and email 31 stop; distinct budgets and day scopes remain independent',()=>{
   const sql=storage();
   for(const [key,limit] of [['chatbot:2026-10-16',50],['reset-emails:2026-10-16',30]]) {

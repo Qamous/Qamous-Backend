@@ -107,6 +107,75 @@ test('same-minute burn, concurrency, importer concurrency and duplicate reservat
   f.db.close();burst.db.close();
 });
 
+test('storage admissions are nonrefundable, retain an essential reserve, and survive restart',()=>{
+  const f=fixture();
+  for(let n=0;n<READ_BUDGET_POLICY.ledgerPublicOperations;n++) {
+    const r=f.ledger.reserve(claim(1),start);assert.equal(r.allowed,true);
+    f.ledger.settle(r.id,0,0,start);
+  }
+  assert.equal(f.ledger.status(start).usage.charged,0);
+  assert.equal(f.ledger.reserve(claim(1),start).reason,'do_storage_budget');
+  assert.equal(f.ledger.reserve(claim(1,'import'),start).reason,'do_storage_budget');
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},event=>f.events.push(event));
+  for(let n=READ_BUDGET_POLICY.ledgerPublicOperations;n<READ_BUDGET_POLICY.ledgerTotalOperations;n++) {
+    const r=restart.reserve(claim(1,'essential'),start);assert.equal(r.allowed,true);
+    restart.settle(r.id,0,0,start);
+  }
+  const before=f.db.prepare('SELECT total_changes() AS n').get().n;
+  for(let n=0;n<1000;n++)assert.equal(restart.reserve(claim(1,'essential'),start).reason,'do_storage_budget');
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,before,'blocked retries write no rows');
+  assert.equal(restart.status(start).usage.operations,READ_BUDGET_POLICY.ledgerTotalOperations);
+  assert.equal(f.events.filter(event=>event.event==='do_storage_budget_threshold').length,1);
+  assert.ok(f.events.filter(event=>event.event==='do_storage_budget_denied').length<20);
+  f.db.close();
+});
+
+test('legacy admitted queries consume the storage allowance during migration',()=>{
+  const f=fixture();
+  f.db.prepare('INSERT INTO read_budget_routes(day,route,tier,queries) VALUES(?,?,?,?)').run(day,'/legacy','public',7770);
+  f.db.exec('ALTER TABLE read_budget_days DROP COLUMN operations');
+  const upgraded=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(upgraded.status(start).usage.operations,7770);
+  assert.equal(upgraded.reserve(claim(1,'essential'),start).reason,'do_storage_budget');
+  f.db.close();
+});
+
+test('refusals and status queries never write cleanup, expiry or UTC rollover rows',()=>{
+  const f=fixture();
+  for(let n=0;n<4;n++)assert.equal(f.ledger.reserve(claim(1),start).allowed,true);
+  const before=f.db.prepare('SELECT total_changes() AS n').get().n;
+  assert.equal(f.ledger.reserve(claim(1),start).reason,'concurrency');
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,before);
+  const later=start+120_000,minute=Math.floor(later/60_000);
+  f.db.prepare('INSERT INTO read_budget_minutes(minute,charged) VALUES(?,?)').run(minute,READ_BUDGET_POLICY.minuteRows);
+  const burned=f.db.prepare('SELECT total_changes() AS n').get().n;
+  assert.equal(f.ledger.reserve(claim(1),later).reason,'burn_rate');
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned,'expired leases stay untouched during denial');
+  const tomorrow=Date.parse('2026-10-23T23:59:30Z');
+  assert.equal(f.ledger.reserve(claim(1),tomorrow).reason,'utc_rollover');
+  assert.equal(f.ledger.status(tomorrow).usage.charged,4);
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned,'rollover preview/status is read only');
+  f.db.close();
+});
+
+test('unknown settlement retries are idempotent and late settlements pay todays storage allowance',()=>{
+  const f=fixture(),r=f.ledger.reserve(claim(100),start);
+  f.ledger.settle(r.id,null,0,start);
+  const unknown=f.db.prepare('SELECT total_changes() AS n').get().n;
+  for(let n=0;n<1000;n++)f.ledger.settle(r.id,null,0,start);
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,unknown);
+  const tomorrow=Date.parse('2026-10-23T12:00:00Z');
+  f.ledger.settle(r.id,10,0,tomorrow);
+  assert.equal(f.ledger.status(tomorrow).usage.operations,1);
+  assert.equal(f.ledger.status(tomorrow).usage.charged,100,'late success cannot refund the conservative carry');
+  const other=f.ledger.reserve(claim(100),start+1000);
+  f.db.prepare('UPDATE read_budget_days SET operations=? WHERE day=?').run(READ_BUDGET_POLICY.ledgerTotalOperations,'2026-10-23');
+  const closed=f.db.prepare('SELECT total_changes() AS n').get().n;
+  assert.equal(f.ledger.settle(other.id,10,0,tomorrow).reason,'do_storage_budget');
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,closed);
+  f.db.close();
+});
+
 function fakeD1({reads=12,writes=0,wait,fail=false,missing=false}={}) {
   let calls=0,firstCalls=0;
   const create=sql=>({sql,bind(){return create(sql);},async all(){calls++;if(wait)await wait;if(fail)throw Error('D1 unknown response');return {success:true,results:[{answer:42}],meta:missing?{}:{rows_read:reads,rows_written:writes}};},async run(){return this.all();},async first(){firstCalls++;throw Error('first must not hide metadata');}});
