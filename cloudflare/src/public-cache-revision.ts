@@ -1,4 +1,4 @@
-import {validPublicCacheKey} from './public-cache-keys.ts';
+import {validPublicCacheKey,publicItemIds} from './public-cache-keys.ts';
 
 interface SqlStore {exec<T extends Record<string,string|number|null>=Record<string,string|number|null>>(query:string,...values:(string|number|null)[]):{toArray():T[];one():T};}
 interface Store {sql:SqlStore;transactionSync<T>(callback:()=>T):T;}
@@ -18,6 +18,11 @@ export function validPublicCacheSelector(value:string):boolean {
 function selectorsFor(key:string):string[] {
   const selectors=[key],colon=key.indexOf(':');
   if(colon!==-1) selectors.push(key.slice(0,colon)+':*');
+  // Reuse the existing bounded mutation scopes for exact-ID batches. Content
+  // edits and moderation invalidate every batch containing an affected ID;
+  // unrelated card ranges stay warm, including legacy seeded snapshots.
+  const itemIds=publicItemIds(key);
+  if(itemIds)selectors.push('cards:*',...itemIds.map(id=>'cards:'+Math.floor(id/100)));
   const related=/^related:([A-Z]{2}):/.exec(key);
   if(related) selectors.push(`related:${related[1]}:*`);
   const browse=/^seo-browse:(en|ar):/.exec(key);
@@ -99,31 +104,38 @@ export class PublicCacheRevision {
         pending:groups.map(group=>legacyPending||group.some(selector=>pending.has(selector))),anyPending};
     });
   }
-  private scoped(id:string,selectors:string[],now:number,claim:boolean):boolean {
+  private conflicts(id:string,selectors:Set<string>,now:number):boolean {
+    const sql=this.store.sql;
+    if(sql.exec('SELECT id FROM public_cache_mutations WHERE expires>? LIMIT 1',now).toArray().length)return true;
+    const words=[...selectors].filter(selector=>/^word:[1-9]\d*$/.test(selector));
+    if(selectors.has('word:*')) {
+      return sql.exec(`SELECT 1 FROM public_cache_mutation_scopes s JOIN public_cache_scoped_mutations m ON m.id=s.mutationId
+        WHERE s.selector GLOB 'word:*' AND s.mutationId<>? AND m.expires>? LIMIT 1`,id,now).toArray().length>0;
+    }
+    if(words.length) {
+      const candidates=['word:*',...words];
+      for(let offset=0;offset<candidates.length;offset+=80) {
+        const chunk=candidates.slice(offset,offset+80),marks=chunk.map(()=>'?').join(',');
+        if(sql.exec(`SELECT 1 FROM public_cache_mutation_scopes s JOIN public_cache_scoped_mutations m ON m.id=s.mutationId
+          WHERE s.selector IN (${marks}) AND s.mutationId<>? AND m.expires>? LIMIT 1`,...chunk,id,now).toArray().length)return true;
+      }
+    }
+    return false;
+  }
+  private scoped(id:string,selectors:string[],now:number,claim:boolean,existingOnly=false):boolean {
     if(!validIdentifier(id)) throw new Error('Invalid public mutation identifier');
     if(!Array.isArray(selectors)||!selectors.length||selectors.length>MAX_SELECTORS||selectors.some(selector=>!validPublicCacheSelector(selector))) throw new Error('Invalid public mutation selectors');
     return this.store.transactionSync(()=>{
       const sql=this.store.sql,merged=new Set(sql.exec<{selector:string}>(`SELECT s.selector FROM public_cache_mutation_scopes s
         JOIN public_cache_scoped_mutations m ON m.id=s.mutationId WHERE s.mutationId=? AND m.expires>?`,id,now).toArray().map(row=>row.selector));
+      if(existingOnly&&!merged.size)return false;
       for(const selector of selectors) merged.add(selector);
       if(merged.size>MAX_SELECTORS) throw new Error('Too many public mutation selectors');
       if(claim) {
         // Check active tickets before expiry maintenance: a denied claim must
         // leave the clock and every durable row untouched. Shared discovery
         // selectors do not serialize edits to otherwise unrelated words.
-        if(sql.exec('SELECT id FROM public_cache_mutations WHERE expires>? LIMIT 1',now).toArray().length) return false;
-        const words=[...merged].filter(selector=>/^word:[1-9]\d*$/.test(selector));
-        if(merged.has('word:*')) {
-          if(sql.exec(`SELECT 1 FROM public_cache_mutation_scopes s JOIN public_cache_scoped_mutations m ON m.id=s.mutationId
-            WHERE s.selector GLOB 'word:*' AND s.mutationId<>? AND m.expires>? LIMIT 1`,id,now).toArray().length) return false;
-        } else if(words.length) {
-          const candidates=['word:*',...words];
-          for(let offset=0;offset<candidates.length;offset+=80) {
-            const chunk=candidates.slice(offset,offset+80),marks=chunk.map(()=>'?').join(',');
-            if(sql.exec(`SELECT 1 FROM public_cache_mutation_scopes s JOIN public_cache_scoped_mutations m ON m.id=s.mutationId
-              WHERE s.selector IN (${marks}) AND s.mutationId<>? AND m.expires>? LIMIT 1`,...chunk,id,now).toArray().length) return false;
-          }
-        }
+        if(this.conflicts(id,merged,now))return false;
       }
       this.expire(now);
       sql.exec('INSERT INTO public_cache_scoped_mutations(id,expires) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET expires=excluded.expires',id,now+PUBLIC_MUTATION_LEASE_MS);
@@ -134,7 +146,20 @@ export class PublicCacheRevision {
     });
   }
   beginScoped(id:string,selectors:string[],now=Date.now()):void {this.scoped(id,selectors,now,false);}
-  claimScoped(id:string,selectors:string[],now=Date.now()):boolean {return this.scoped(id,selectors,now,true);}
+  claimScoped(id:string,selectors:string[],now=Date.now(),existingOnly=false):boolean {return this.scoped(id,selectors,now,true,existingOnly);}
+  renewScoped(id:string,now=Date.now()):boolean {
+    if(!validIdentifier(id))throw new Error('Invalid public mutation identifier');
+    return this.store.transactionSync(()=>{
+      // Never resurrect an expired ticket: its source data may already have
+      // been changed by a newer writer after expiration.
+      const ticket=this.store.sql.exec<{expires:number}>('SELECT expires FROM public_cache_scoped_mutations WHERE id=?',id).toArray()[0];
+      if(!ticket||Number(ticket.expires)<=now)return false;
+      const selectors=new Set(this.store.sql.exec<{selector:string}>('SELECT selector FROM public_cache_mutation_scopes WHERE mutationId=?',id).toArray().map(row=>row.selector));
+      if(this.conflicts(id,selectors,now))return false;
+      this.store.sql.exec('UPDATE public_cache_scoped_mutations SET expires=? WHERE id=?',now+PUBLIC_MUTATION_LEASE_MS,id);
+      return true;
+    });
+  }
   finishScoped(id:string):void {
     if(!validIdentifier(id)) throw new Error('Invalid public mutation identifier');
     this.store.transactionSync(()=>{

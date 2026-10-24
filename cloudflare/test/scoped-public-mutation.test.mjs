@@ -10,7 +10,7 @@ import {build} from 'esbuild';
 // are local adapters; queries execute against the real migrated SQLite schema.
 // Synthetic metadata below tests accounting integration, not D1 query costs.
 const bundled=await build({stdin:{contents:`
-  export {QamousPublicCache,publicData,publicDataMany,publicMutationBarrier} from './src/public-cache.ts';
+  export {QamousPublicCache,publicData,publicDataMany,publicMutationBarrier,preparePublicMutation} from './src/public-cache.ts';
   export {ReadBudgetLedger} from './src/read-budget-ledger.ts';
   export {guardD1} from './src/read-budget.ts';
   export {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION} from './src/public-cache-keys.ts';
@@ -23,7 +23,7 @@ const bundled=await build({stdin:{contents:`
         'export class DurableObject { constructor(ctx,env) {this.ctx=ctx;this.env=env;} }'}));
     },
   }]});
-const {QamousPublicCache,publicData,publicDataMany,publicMutationBarrier,ReadBudgetLedger,guardD1,
+const {QamousPublicCache,publicData,publicDataMany,publicMutationBarrier,preparePublicMutation,ReadBudgetLedger,guardD1,
   PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'));
 
 const day='2026-10-22',now=Date.parse(day+'T12:00:00Z');
@@ -55,24 +55,27 @@ function fixture(t) {
       (201,2,1,'EG','Unrelated meaning B',0);
     INSERT INTO posts VALUES ('post-a','1','Original post','Original post content',100,0);`);
   const ledger=new ReadBudgetLedger(ledgerStore,{day,rows:0},()=>{});
-  let executions=0,failNextWrite=false;
+  let executions=0,failNextWrite=false,afterReadBatch,afterSettledBatch,unknownSql;
   const raw={prepare(query) {
     const create=(args=[])=>({bind(...next) {return create(next);},async all() {
       executions++;
       const writing=/^(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(query.replace(/^\s*\/\*[\s\S]*?\*\/\s*/,''));
-      if(writing&&failNextWrite) {failNextWrite=false;throw Error('Synthetic unknown D1 result');}
+      if(writing&&failNextWrite) {failNextWrite=false;unknownSql=()=>sql.prepare(query).all(...args);throw Error('Synthetic unknown D1 result');}
       const results=sql.prepare(query).all(...args);
       const written=writing?Number(sql.prepare('SELECT changes() AS n').get().n):0;
       return {success:true,results,meta:{rows_read:Math.max(1,results.length),rows_written:written}};
     },async run() {return this.all();}});
     return create();
   },async batch(statements) {
-    sql.exec('BEGIN');try {const results=[];for(const statement of statements) results.push(await statement.all());sql.exec('COMMIT');return results;}
+    const results=[];sql.exec('BEGIN');try {for(const statement of statements)results.push(await statement.all());sql.exec('COMMIT');}
     catch(error) {sql.exec('ROLLBACK');throw error;}
+    if(afterReadBatch&&results.every(row=>row.meta.rows_written===0)){afterSettledBatch=afterReadBatch;afterReadBatch=undefined;}
+    return results;
   }};
   const env={DB:raw,READ_BUDGET:{getByName:()=>({
     reserve:async input=>ledger.reserve(input,now),
-    settle:async(id,actual,writes)=>ledger.settle(id,actual,writes,now),
+    settle:async(id,actual,writes)=>{const result=ledger.settle(id,actual,writes,now);
+      if(afterSettledBatch){const hook=afterSettledBatch;afterSettledBatch=undefined;await hook();}return result;},
   })},PUBLIC_CACHE:{getByName(name) {
     if(!objects.has(name)) {
       if(!stores.has(name)) stores.set(name,store());
@@ -88,6 +91,9 @@ function fixture(t) {
   return {sql,env,ledger,coordinator,charge,writer,
     get executions() {return executions;},
     failWrite() {failNextWrite=true;},
+    commitUnknownWrite() {assert.ok(unknownSql);const commit=unknownSql;unknownSql=undefined;commit();},
+    afterReadBatch(hook) {afterReadBatch=hook;},
+    expireTickets() {stores.get(PUBLIC_CACHE_REVISION).db.exec('UPDATE public_cache_scoped_mutations SET expires=0');},
     restart(key) {objects.delete(PUBLIC_CACHE_PREFIX+key);}};
 }
 
@@ -102,6 +108,66 @@ async function warm(f,keys=['word:1','word:2']) {
   return values;
 }
 const temporarilyUnavailable=error=>error.name==='ReadBudgetError'&&error.status===503;
+
+test('prepared-card publication retains the word lock until the derived D1 payload is stored',async t=>{
+  const f=fixture(t);f.env.PUBLIC_CARD_PAYLOADS='true';
+  const scope=async()=>['word:1','cards:0'];
+  const prepare=(keys,renew)=>preparePublicMutation(f.env,keys,renew);
+  const first=publicMutationBarrier(f.env,scope,undefined,prepare);
+  await f.writer(first).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('First edited meaning',1).run();
+  let competed=false;
+  f.afterReadBatch(async()=>{
+    const second=publicMutationBarrier(f.env,scope,undefined,prepare);
+    const before=f.executions;
+    await assert.rejects(()=>f.writer(second).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('Competing edit',1).run(),{status:409});
+    await second.finish();
+    assert.equal(f.executions,before,'a concurrent edit cannot reach D1 during preparation');competed=true;
+  });
+  await first.finish();assert.equal(competed,true);
+  const saved=JSON.parse(f.sql.prepare('SELECT payload FROM public_card_payloads WHERE definitionId=1').get().payload);
+  assert.equal(saved.definition,'First edited meaning');
+  assert.equal((await f.coordinator.snapshot(['word:1'])).anyPending,false);
+});
+
+test('a slow prepared-card read cannot overwrite the newer payload after its mutation lease expires',async t=>{
+  const f=fixture(t);f.env.PUBLIC_CARD_PAYLOADS='true';
+  const scope=async()=>['word:1','cards:0'];
+  const prepare=(keys,renew)=>preparePublicMutation(f.env,keys,renew);
+  const first=publicMutationBarrier(f.env,scope,undefined,prepare);
+  await f.writer(first).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('Older edited meaning',1).run();
+  let competed=false;
+  f.afterReadBatch(async()=>{
+    f.expireTickets();
+    const second=publicMutationBarrier(f.env,scope,undefined,prepare);
+    await f.writer(second).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('Newest edited meaning',1).run();
+    await second.finish();competed=true;
+    assert.equal(JSON.parse(f.sql.prepare('SELECT payload FROM public_card_payloads WHERE definitionId=1').get().payload).definition,'Newest edited meaning');
+  });
+  await first.finish();assert.equal(competed,true);
+  assert.equal(f.sql.prepare('SELECT definition FROM definitions WHERE id=1').get().definition,'Newest edited meaning');
+  assert.equal(JSON.parse(f.sql.prepare('SELECT payload FROM public_card_payloads WHERE definitionId=1').get().payload).definition,'Newest edited meaning');
+  assert.equal((await f.coordinator.snapshot(['word:1'])).anyPending,false);
+});
+
+test('an uncertain prepared-card INSERT retains its word claim until a potentially delayed D1 write is safe',async t=>{
+  const f=fixture(t);f.env.PUBLIC_CARD_PAYLOADS='true';
+  const scope=async()=>['word:1','cards:0'];
+  const prepare=(keys,renew)=>preparePublicMutation(f.env,keys,renew);
+  const first=publicMutationBarrier(f.env,scope,undefined,prepare);
+  await f.writer(first).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('First edited meaning',1).run();
+  f.failWrite();await first.finish();
+  assert.deepEqual((await f.coordinator.snapshot(['word:1','word:2'])).pending,[true,false]);
+  const second=publicMutationBarrier(f.env,scope,undefined,prepare);
+  await assert.rejects(()=>f.writer(second).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('Premature edit',1).run(),{status:409});
+  await second.finish();
+  f.commitUnknownWrite();
+  assert.equal(JSON.parse(f.sql.prepare('SELECT payload FROM public_card_payloads WHERE definitionId=1').get().payload).definition,'First edited meaning');
+  f.expireTickets();
+  const next=publicMutationBarrier(f.env,scope,undefined,prepare);
+  await f.writer(next).prepare('UPDATE definitions SET definition=? WHERE id=?').bind('Newest edited meaning',1).run();
+  await next.finish();
+  assert.equal(JSON.parse(f.sql.prepare('SELECT payload FROM public_card_payloads WHERE definitionId=1').get().payload).definition,'Newest edited meaning');
+});
 
 test('at 4.6m reads, editing A blocks its stale snapshot but B stays warm without D1',async t=>{
   const f=fixture(t),[,wordB]=await warm(f);

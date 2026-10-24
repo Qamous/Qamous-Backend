@@ -1,8 +1,9 @@
 import { ApiError, positiveId, joinWord, withWord, withSpellings, type Row } from './data.ts';
 import { exploreQuery } from './explore.ts';
-import { feedCandidatesSql, feedItemsQuery } from './feed.ts';
+import { feedCandidatesSql, preparedFeedCandidatesSql, feedItemsQuery } from './feed.ts';
 import { attachProvenance, licenseLink } from './provenance.ts';
 import { seoIndex, seoShard, seoBucket, seoBrowse, seoDialect } from './seo.ts';
+import { validatePublicSeed } from './public-cache-keys.ts';
 
 export const RELATED_SAMPLE_SIZE = 100;
 export const PUBLIC_CARD_BUCKET_SIZE = 100;
@@ -93,12 +94,49 @@ export function publicItemsFromBuckets(params: URLSearchParams,buckets: Row[][])
   return {results,total:results.length,page:1,limit};
 }
 
-export async function resolvePublicData(db: D1Database,key: string): Promise<unknown> {
+// Canonicalize only the cache identity. The caller's random order is restored
+// by publicItemsFromBuckets; permutations must not create different cache fills.
+export function publicItemsKey(params: URLSearchParams): string {
+  const {values}=feedItemsQuery(params);
+  return 'items:'+values.slice().sort((a,b)=>a-b).join(',');
+}
+
+export async function publicItems(db:D1Database,ids:number[],prepared=false):Promise<Row[]> {
+  const ready=new Map<number,Row>();
+  if(prepared) {
+    const stored=await db.prepare(`SELECT definitionId,payload FROM public_card_payloads WHERE definitionId IN (${ids.map(()=>'?').join(',')})`).bind(...ids).all<{definitionId:number;payload:string}>();
+    for(const entry of stored.results) {
+      const row=JSON.parse(entry.payload) as Row;
+      validatePublicSeed('items:'+entry.definitionId,[row]);
+      if(!row||typeof row!=='object'||Array.isArray(row)||Number(row.definitionId??row.id)!==entry.definitionId)throw new ApiError(503,'Invalid prepared public card');
+      ready.set(entry.definitionId,row);
+    }
+  }
+  const missing=ids.filter(id=>!ready.has(id));
+  if(!missing.length)return ids.map(id=>ready.get(id)!);
+  // The public cache accepts at most 50 exact IDs. A cold ten-card request
+  // enriches ten definitions, rather than ten unrelated 100-definition ranges.
+  const marks=missing.map(()=>'?').join(',');
+  const rows=await db.prepare(`SELECT d.*,d.id AS definitionId,
+    CASE WHEN d.isArabic=1 THEN d.arabicWord ELSE COALESCE(d.francoArabicWord,d.arabicWord) END AS word,
+    d.likeCount-d.dislikeCount AS likeDislikeDifference,0 AS isLiked,0 AS isDisliked,0 AS isReported
+    FROM (${joinWord}) d WHERE d.id IN (${marks}) AND d.reportCount<=5 AND d.wordReportCount<=5 ORDER BY d.id`)
+    .bind(...missing).all<Row>();
+  for(const row of await attachProvenance(db,rows.results.map(withSpellings)))ready.set(Number(row.definitionId),row);
+  return ids.map(id=>ready.get(id)).filter((row):row is Row=>!!row);
+}
+
+export async function resolvePublicData(db: D1Database,key: string,preparedCards=false): Promise<unknown> {
   if(key==='posts') return (await db.prepare('SELECT id,userId,title,content,createdSeconds,createdNanoseconds FROM posts ORDER BY createdSeconds DESC,createdNanoseconds DESC').all<Row>()).results.map(p=>({id:p.id,userId:p.userId,title:p.title,content:p.content,createdAt:{seconds:p.createdSeconds,nanoseconds:p.createdNanoseconds}}));
   if(key==='sources') return (await db.prepare('SELECT id,name,sourceUrl,license,licenseUrl,rightsStatus,credit,notice,attributionRequired,releaseHash FROM import_sources ORDER BY name').all<Row>()).results.map(row=>({...row,licenseUrl:licenseLink(String(row.license),String(row.licenseUrl))}));
   if(key==='countries') return (await db.prepare('SELECT * FROM countries ORDER BY countryName').all()).results;
-  if(/^feed:[01]$/.test(key)) return (await db.prepare(feedCandidatesSql).bind(Number(key.slice(-1))).all()).results;
+  if(/^feed:[01]$/.test(key)) return (await db.prepare(preparedCards?preparedFeedCandidatesSql:feedCandidatesSql).bind(Number(key.slice(-1))).all()).results;
   if(/^word:[1-9]\d*$/.test(key)) return publicWord(db,positiveId(key.slice(5)));
+  if(key.startsWith('items:')) {
+    const params=new URLSearchParams({ids:key.slice(6)});
+    if(publicItemsKey(params)!==key) throw new ApiError(400,'Invalid public item resource');
+    return publicItems(db,feedItemsQuery(params).values,preparedCards);
+  }
   if(/^cards:\d+$/.test(key)) {
     const bucket=Number(key.slice(6));
     if(!Number.isSafeInteger(bucket)||bucket<0||bucket>Math.floor(Number.MAX_SAFE_INTEGER/PUBLIC_CARD_BUCKET_SIZE)-1) throw new ApiError(400,'Invalid card bucket');

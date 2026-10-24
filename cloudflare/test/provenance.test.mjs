@@ -28,7 +28,7 @@ function fixture() {
       first: async () => sql.prepare(query).get(...args) ?? null,
     });
     return statement([]);
-  } };
+  }, async batch(statements) {return Promise.all(statements.map(statement=>statement.all()));} };
   return {sql,db,calls};
 }
 test('cards get original credit, linked license, importer disclosure, and labeled examples', async () => {

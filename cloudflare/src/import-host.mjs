@@ -5,6 +5,8 @@ import {runCloudImport,publicStatus,recoverBaselineHalt} from './import-cloud.mj
 import {READ_BUDGET_OBJECT} from './read-budget.ts';
 import {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION,validatePublicSeed} from './public-cache-keys.ts';
 import {IMPORT_MANIFEST,IMPORT_LIMITS} from './import-cloud-policy.mjs';
+import {guardD1} from './read-budget.ts';
+import {storePreparedCards} from './public-card-payloads.ts';
 import {fetchHostedFreeGuard} from '../scripts/hosted-free-guard.mjs';
 
 const encoder=new TextEncoder();
@@ -123,9 +125,35 @@ export default {
     if(!await isAuthorized(request,env))return response({error:'Unauthorized'},401);
     // Authenticated inspection and the narrowly checked pre-D1 baseline repair
     // are available during pause; neither endpoint submits an import packet.
-    if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET')&&!(url.pathname==='/recover-baseline'&&request.method==='POST')&&!(url.pathname==='/recovery-export-budget'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
+    if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET')&&!(url.pathname==='/read-budget'&&request.method==='GET')&&!(url.pathname==='/recover-baseline'&&request.method==='POST')&&!(url.pathname==='/recovery-export-budget'&&request.method==='POST')
+      &&!(url.pathname==='/prepared-cards/seed'&&request.method==='POST')&&!(url.pathname==='/prepared-cards/status'&&request.method==='GET')&&!(url.pathname==='/prepared-cards/maintenance-budget'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
       {status:503,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Retry-After':'60'}});
     try {
+      if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
+      if(url.pathname==='/prepared-cards/maintenance-budget'&&request.method==='POST') {
+        if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Prepared-card migration requires paused writers'},409);
+        const input=await boundedJson(request,1024);
+        if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='id,operation'||input.operation!=='migration-0009'||typeof input.id!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.id))throw Error('The reviewed migration identity is required');
+        // Fixed essential admission works before the prepared tables exist.
+        // This endpoint executes no SQL and grants no caller-selected budget.
+        return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserve({id:input.id,rows:250000,route:'maintenance:prepared-migration-0009',tier:'essential'}));
+      }
+      if(url.pathname==='/prepared-cards/seed'&&request.method==='POST') {
+        if(env.PUBLIC_READ_ONLY!=='true'||env.PUBLIC_CARD_PAYLOADS!=='true')return response({error:'Prepared-card seeding requires paused writers and the installed read model'},409);
+        const input=await boundedJson(request,2_000_000);
+        if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).join(',')!=='cards'||!Array.isArray(input.cards)||input.cards.length<1||input.cards.length>50)throw Error('A bounded prepared-card batch is required');
+        const db=guardD1(env.DB,env,{route:'maintenance:prepare-cards',tier:'essential'});
+        return response({stored:await storePreparedCards(db,input.cards)});
+      }
+      if(url.pathname==='/prepared-cards/status'&&request.method==='GET') {
+        if(env.PUBLIC_READ_ONLY!=='true'||env.PUBLIC_CARD_PAYLOADS!=='true')return response({error:'Prepared-card inspection requires paused writers and the installed read model'},409);
+        const db=guardD1(env.DB,env,{route:'maintenance:prepared-status',tier:'essential'});
+        const result=await db.prepare(`/* qamous-read:50000 */ SELECT (SELECT COUNT(*) FROM public_card_payloads) AS preparedCards,
+          (SELECT COUNT(*) FROM public_feed_candidates) AS feedCandidates,
+          (SELECT COUNT(*) FROM public_definitions d JOIN words w ON w.id=d.wordId WHERE d.reportCount<=5 AND w.reportCount<=5) AS eligibleCards,
+          (SELECT COUNT(*) FROM public_definitions d JOIN words w ON w.id=d.wordId LEFT JOIN public_card_payloads p ON p.definitionId=d.id WHERE d.reportCount<=5 AND w.reportCount<=5 AND p.definitionId IS NULL) AS missingPayloads`).first();
+        return response(result);
+      }
       // Admission only: this cannot run SQL or resume writers. Keep the full
       // conservative export charge; never refund an unmeasured D1 export.
       if(url.pathname==='/recovery-export-budget'&&request.method==='POST') {
@@ -138,7 +166,6 @@ export default {
         if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Baseline recovery requires ingestion to remain explicitly paused'},409);
         return response(await stub.recoverBaseline(await boundedJson(request,2048)));
       }
-      if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
       if(url.pathname==='/read-budget/reconcile'&&request.method==='POST') {
         return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile(await boundedJson(request,1024)));
       }

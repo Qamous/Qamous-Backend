@@ -111,6 +111,47 @@ test('ordinary snapshots perform indexed reads and no writes while still reporti
   } finally {f.db.close();}
 });
 
+test('exact-ID card batches inherit moderation and legacy card-range barriers without invalidating unrelated batches',()=>{
+  const f=fixture();try {
+    const keys=['items:1,201','items:301,401','items:2,202'];
+    f.revision.beginScoped('moderate-card',['word:1','cards:0'],1000);
+    assert.deepEqual(f.revision.snapshot(keys,1001).pending,[true,false,true]);
+    f.revision.finishScoped('moderate-card');
+    assert.deepEqual(f.revision.snapshot(keys,1002).versions,[3,1,3]);
+    assert.ok(f.revision.snapshot(keys,1002).pending.every(value=>!value));
+    f.revision.beginScoped('legacy-card-family',['cards:*'],1003);
+    assert.ok(f.revision.snapshot(keys,1004).pending.every(Boolean));
+  } finally {f.db.close();}
+});
+
+test('preparation renews only a live exclusive lease and expired scope expansion cannot resurrect it',()=>{
+  const f=fixture();try {
+    assert.equal(f.revision.claimScoped('original-writer',['word:1','cards:0'],1000),true);
+    assert.equal(f.revision.renewScoped('original-writer',2000),true);
+    assert.equal(f.revision.claimScoped('competitor-writer',['word:1'],1000+PUBLIC_MUTATION_LEASE_MS),false,'renewal keeps the original lock active');
+    const expired=2000+PUBLIC_MUTATION_LEASE_MS;
+    assert.equal(f.revision.claimScoped('competitor-writer',['word:1'],expired),true);
+    const before=f.revision.snapshot(['word:1','word:2'],expired+1),changes=f.db.prepare('SELECT total_changes() AS n').get().n;
+    assert.equal(f.revision.renewScoped('original-writer',expired+1),false);
+    assert.equal(f.revision.claimScoped('original-writer',['word:1','word:2'],expired+1,true),false);
+    assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,changes,'lost lease and expansion are read-only refusals');
+    assert.deepEqual(f.revision.snapshot(['word:1','word:2'],expired+1),before);
+    assert.deepEqual(before.pending,[true,false]);
+  } finally {f.db.close();}
+});
+
+test('preparation renewal refuses legacy maintenance overlap instead of publishing from a nonexclusive ticket',()=>{
+  const f=fixture();try {
+    f.revision.claimScoped('original-writer',['word:1'],1000);
+    f.revision.beginScoped('legacy-word-maintenance',['word:1'],1001);
+    assert.equal(f.revision.renewScoped('original-writer',1002),false);
+    f.revision.finishScoped('legacy-word-maintenance');
+    assert.equal(f.revision.renewScoped('original-writer',1003),true);
+    f.revision.begin('legacy-global-maintenance',1004);
+    assert.equal(f.revision.renewScoped('original-writer',1005),false);
+  } finally {f.db.close();}
+});
+
 test('selector and key validation prevents a broad wildcard or malformed scope from changing the clock',()=>{
   const f=fixture();try {
     for(const selector of ['word:*','cards:*','feed:*','explore:*','related:*','related:EG:*','seo-shard:*','seo-browse:*','seo-browse:en:*','seo-browse:ar:*','seo-dialect:*','word:12','countries','posts']) assert.equal(validPublicCacheSelector(selector),true,selector);
