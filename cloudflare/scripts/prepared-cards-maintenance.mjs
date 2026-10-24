@@ -55,7 +55,7 @@ export async function auditedPreparedSnapshot(manifestFile,now=Date.now()) {
   return {cards:[...cards.values()].sort((a,b)=>Number(a.definitionId??a.id)-Number(b.definitionId??b.id)),feedCandidates:feed.size,exportCompletedAt:manifest.exportCompletedAt,snapshotId:manifest.snapshotId};
 }
 function command(args) {
-  const result=spawnSync(process.execPath,[cli,...args],{cwd:root,encoding:'utf8',windowsHide:true,maxBuffer:4*1024*1024,env:{...process.env,CI:'true'}});
+  const result=spawnSync(process.execPath,[cli,...args],{cwd:root,encoding:'utf8',windowsHide:true,maxBuffer:4*1024*1024,env:{...process.env,CI:'true',CLOUDFLARE_ACCOUNT_ID:ACCOUNT_ID}});
   if(result.status!==0)throw Error('Reviewed Wrangler operation failed; inspect its local log before retrying');
   return result.stdout;
 }
