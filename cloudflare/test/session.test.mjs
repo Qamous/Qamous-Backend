@@ -18,7 +18,7 @@ test('persistent login sessions in the local Workers/D1 runtime',async t=>{
     compatibilityDate:'2026-10-16',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],
     durableObjects:{RUNTIME:{className:'QamousRuntime',useSQLite:true},READ_BUDGET:{className:'QamousReadBudget',useSQLite:true},PUBLIC_CACHE:{className:'QamousPublicCache',useSQLite:true}},
     bindings:{SESS_SECRET:'synthetic-session-secret',PASSWORD_PEPPER:'synthetic-password-pepper',RESET_SECRET:'synthetic-reset-secret',
-      ALLOWED_ORIGINS:'https://qamous.org',APP_URL:'https://qamous.org',ENABLE_AI:'false',READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0'},
+      ALLOWED_ORIGINS:'https://qamous.org',APP_URL:'https://qamous.org',ENABLE_AI:'false',READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0',AUXILIARY_WRITE_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),AUXILIARY_WRITE_BOOTSTRAP_ROWS:'0'},
     outboundService:()=>{throw new Error('Session tests must not contact external services');}}));
   t.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB');

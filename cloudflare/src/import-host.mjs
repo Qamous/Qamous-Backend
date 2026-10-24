@@ -3,8 +3,8 @@
 import {DurableObject} from 'cloudflare:workers';
 import {runCloudImport,publicStatus,recoverBaselineHalt} from './import-cloud.mjs';
 import {READ_BUDGET_OBJECT} from './read-budget.ts';
-import {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION,validatePublicSeed} from './public-cache-keys.ts';
-import {IMPORT_MANIFEST,IMPORT_LIMITS} from './import-cloud-policy.mjs';
+import {PUBLIC_CACHE_CONTENT_V2,PUBLIC_CACHE_REVISION,validatePublicSeed} from './public-cache-keys.ts';
+import {IMPORT_MANIFEST,IMPORT_LIMITS,quotaRetryAt,nextImportDay} from './import-cloud-policy.mjs';
 import {guardD1} from './read-budget.ts';
 import {storePreparedCards} from './public-card-payloads.ts';
 import {fetchHostedFreeGuard} from '../scripts/hosted-free-guard.mjs';
@@ -42,24 +42,39 @@ class ImportObjectStore {
 export class QamousImportState extends DurableObject {
   constructor(ctx,env){
     super(ctx,env);
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS import_objects(key TEXT PRIMARY KEY,value TEXT NOT NULL,etag TEXT NOT NULL,bytes INTEGER NOT NULL,sha256 TEXT NOT NULL) WITHOUT ROWID');
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS import_storage(id INTEGER PRIMARY KEY,pages INTEGER NOT NULL,bytes INTEGER NOT NULL,deletedPages INTEGER NOT NULL,lastCleanupAt TEXT,lastScheduledAt TEXT)');
-    ctx.storage.sql.exec('INSERT OR IGNORE INTO import_storage(id,pages,bytes,deletedPages) VALUES(1,0,0,0)');
     this.objects=new ImportObjectStore(ctx);
+    this.storageReady=false;
+  }
+  async auxiliary(cost){try{return await this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserveAuxiliaryWrites(cost,'import');}catch{return false;}}
+  async initialize(write=false){
+    if(this.storageReady)return true;
+    const sql=this.ctx.storage.sql,tables=new Set(sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('import_objects','import_storage')").toArray().map(row=>row.name));
+    const row=tables.has('import_storage')?sql.exec('SELECT id FROM import_storage WHERE id=1').toArray()[0]:undefined;
+    const cost=(tables.has('import_objects')?0:2)+(tables.has('import_storage')?0:2)+(row?0:1);
+    if(cost&&(!write||!await this.auxiliary(cost)))return false;
+    if(cost)this.ctx.storage.transactionSync(()=>{
+      sql.exec('CREATE TABLE IF NOT EXISTS import_objects(key TEXT PRIMARY KEY,value TEXT NOT NULL,etag TEXT NOT NULL,bytes INTEGER NOT NULL,sha256 TEXT NOT NULL) WITHOUT ROWID');
+      sql.exec('CREATE TABLE IF NOT EXISTS import_storage(id INTEGER PRIMARY KEY,pages INTEGER NOT NULL,bytes INTEGER NOT NULL,deletedPages INTEGER NOT NULL,lastCleanupAt TEXT,lastScheduledAt TEXT)');
+      sql.exec('INSERT OR IGNORE INTO import_storage(id,pages,bytes,deletedPages) VALUES(1,0,0,0)');
+    });
+    this.storageReady=true;return true;
   }
   async stage(file,method,value,sha256){
     if(!/^(job\.json|pages\/\d{6}\.json)$/.test(file))throw Error('Invalid staging key');
+    if(!await this.initialize(method!=='HEAD')){if(method==='HEAD')return {exists:false};throw Error('The shared import storage allowance is unavailable');}
     const key=prefix(this.env)+file,existing=await this.objects.head(key);
     if(method==='HEAD')return existing?{exists:true,bytes:existing.size,sha256:existing.customMetadata.sha256}:{exists:false};
     if(!existing&&this.ctx.storage.sql.databaseSize+encoder.encode(value||'').length>450000000)throw Error('Free staging storage headroom reached');
     if(typeof value!=='string'||encoder.encode(value).length>IMPORT_LIMITS.objectBytes||await checksum(value)!==sha256)throw Error('Staged object checksum or length differs');
     if(existing){if(existing.customMetadata.sha256!==sha256)throw Error('Immutable staging object differs');return {staged:true,sha256};}
+    if(!await this.auxiliary(2))throw Error('The shared import storage allowance is unavailable');
     const stored=await this.objects.put(key,value,{onlyIf:{etagDoesNotMatch:'*'},customMetadata:{sha256}});
     if(!stored)throw Error('Concurrent stage conflict');
     return {staged:true,sha256};
   }
   async arm(state){
     if(state.jobHash!==this.env.IMPORT_JOB_HASH||state.manifestHash!==IMPORT_MANIFEST||state.cursor!==0)throw Error('Unexpected initial import checkpoint');
+    if(!await this.initialize())throw Error('Job manifest has not been staged');
     const key=prefix(this.env),existing=await this.objects.get(key+'checkpoint.json');
     if(existing)return this.status();
     const root=await this.objects.get(key+'job.json');if(!root)throw Error('Job manifest has not been staged');
@@ -69,10 +84,12 @@ export class QamousImportState extends DurableObject {
     // Every immutable upload checks its hash, and the installer HEAD-verifies
     // all of them before arming. State contains no arbitrary SQL or new records.
     if(state.packetCount!==job.packetCount||state.totalRecords!==job.totalRecords)throw Error('Checkpoint counts differ from staged manifest');
+    if(!await this.auxiliary(1))throw Error('The shared import storage allowance is unavailable');
     await this.objects.put(key+'checkpoint.json',JSON.stringify(state),{onlyIf:{etagDoesNotMatch:'*'}});
     return this.status();
   }
   async cleanupConsumed(){
+    if(!await this.initialize())return;
     const loaded=await this.objects.get(prefix(this.env)+'checkpoint.json');if(!loaded)return;
     const state=JSON.parse(await loaded.text());
     if(state.manifestHash!==IMPORT_MANIFEST||state.jobHash!==this.env.IMPORT_JOB_HASH)throw Error('Cleanup checkpoint mismatch');
@@ -81,7 +98,7 @@ export class QamousImportState extends DurableObject {
     // checkpoint, job manifest, D1 records, source credits or local recovery data.
     const lower=prefix(this.env)+'pages/000000.json',upper=prefix(this.env)+'pages/'+String(pageEnd).padStart(6,'0')+'.json';
     this.ctx.storage.transactionSync(()=>{
-      const consumed=this.ctx.storage.sql.exec('SELECT key,bytes FROM import_objects WHERE key>=? AND key<? ORDER BY key LIMIT 50',lower,upper).toArray();
+      const consumed=this.ctx.storage.sql.exec('SELECT key,bytes FROM import_objects WHERE key>=? AND key<? ORDER BY key LIMIT 1',lower,upper).toArray();
       if(!consumed.length)return;
       for(const row of consumed)this.ctx.storage.sql.exec('DELETE FROM import_objects WHERE key=?',row.key);
       this.ctx.storage.sql.exec('UPDATE import_storage SET pages=pages-?,bytes=bytes-?,deletedPages=deletedPages+?,lastCleanupAt=? WHERE id=1',consumed.length,consumed.reduce((sum,row)=>sum+row.bytes,0),consumed.length,new Date().toISOString());
@@ -89,15 +106,30 @@ export class QamousImportState extends DurableObject {
   }
   async tick(origin){
     if(!['scheduled','manual'].includes(origin))throw Error('Invalid invocation origin');
+    if(!await this.initialize())return this.status();
+    const loaded=await this.objects.get(prefix(this.env)+'checkpoint.json');
+    if(!loaded)return this.status();
+    const state=JSON.parse(await loaded.text()),now=new Date(),staging=this.storageStatus();
+    if(state.jobHash!==this.env.IMPORT_JOB_HASH||state.manifestHash!==IMPORT_MANIFEST)throw Error('Cloud checkpoint identity mismatch');
+    const retryAt=quotaRetryAt(state,now);
+    // A cron which is merely waiting must not spend durable writes on heartbeat
+    // timestamps, checkpoints or cleanup. Reassess an eligible legacy hold using
+    // the normal policy helper; no quota or uncertain flight is cleared here.
+    if(state.lease&&Date.parse(state.lease.expiresAt)>now.getTime())return {...publicStatus(state),state:'busy',nextAttemptAt:retryAt,lastScheduledAt:staging.lastScheduledAt,staging};
+    if(state.halted||state.status==='complete'||state.nextAttemptAt&&Date.parse(retryAt)>now.getTime())return {...publicStatus(state),nextAttemptAt:retryAt,lastScheduledAt:staging.lastScheduledAt,staging};
+    // Covers one schedule timestamp, claim/prewrite/measurement/final checkpoint
+    // writes, one read-baseline reconciliation, one old-page deletion+metadata,
+    // and bounded failure-path persistence. The grant charges its own row too.
+    if(!await this.auxiliary(12))return {...publicStatus(state),state:'waiting_for_free_quota',reason:'Shared import storage allowance reached',nextAttemptAt:nextImportDay(now),lastScheduledAt:staging.lastScheduledAt,staging};
     if(origin==='scheduled')this.ctx.storage.sql.exec('UPDATE import_storage SET lastScheduledAt=? WHERE id=1',new Date().toISOString());
     const baseline=JSON.parse(this.env.FREE_PLAN_BASELINE||'null');
     const result=await runCloudImport({...this.env,IMPORTS:this.objects},origin,{billing:()=>fetchHostedFreeGuard(this.env.CLOUDFLARE_READ_TOKEN,baseline)});
     await this.cleanupConsumed();
-    const staging=this.storageStatus();return {...result,lastScheduledAt:staging.lastScheduledAt,staging};
+    const after=this.storageStatus();return {...result,lastScheduledAt:after.lastScheduledAt,staging:after};
   }
-  storageStatus(){const row=this.ctx.storage.sql.exec('SELECT pages,bytes,deletedPages,lastCleanupAt,lastScheduledAt FROM import_storage WHERE id=1').one();return {backend:'Free SQLite Durable Object',remainingPages:row.pages,remainingBytes:row.bytes,databaseBytes:this.ctx.storage.sql.databaseSize,consumedPagesDeleted:row.deletedPages,lastCleanupAt:row.lastCleanupAt,lastScheduledAt:row.lastScheduledAt,cleanup:'after verified D1 commit and durable checkpoint'};}
-  async status(){const loaded=await this.objects.get(prefix(this.env)+'checkpoint.json');const staging=this.storageStatus();return {...(loaded?publicStatus(JSON.parse(await loaded.text())):{state:'not_armed'}),lastScheduledAt:staging.lastScheduledAt,staging};}
-  async recoverBaseline(expected){const baseline=JSON.parse(this.env.FREE_PLAN_BASELINE||'null');return recoverBaselineHalt({...this.env,IMPORTS:this.objects},expected,{billing:()=>fetchHostedFreeGuard(this.env.CLOUDFLARE_READ_TOKEN,baseline)});}
+  storageStatus(){const row=this.storageReady?this.ctx.storage.sql.exec('SELECT pages,bytes,deletedPages,lastCleanupAt,lastScheduledAt FROM import_storage WHERE id=1').one():{pages:0,bytes:0,deletedPages:0,lastCleanupAt:null,lastScheduledAt:null};return {backend:'Free SQLite Durable Object',remainingPages:row.pages,remainingBytes:row.bytes,databaseBytes:this.ctx.storage.sql.databaseSize,consumedPagesDeleted:row.deletedPages,lastCleanupAt:row.lastCleanupAt,lastScheduledAt:row.lastScheduledAt,cleanup:'after verified D1 commit and durable checkpoint'};}
+  async status(){const loaded=await this.initialize()?await this.objects.get(prefix(this.env)+'checkpoint.json'):null;const staging=this.storageStatus();return {...(loaded?publicStatus(JSON.parse(await loaded.text())):{state:'not_armed'}),lastScheduledAt:staging.lastScheduledAt,staging};}
+  async recoverBaseline(expected){if(!await this.initialize())throw Error('Job manifest has not been staged');if(!await this.auxiliary(2))throw Error('The shared import storage allowance is unavailable');const baseline=JSON.parse(this.env.FREE_PLAN_BASELINE||'null');return recoverBaselineHalt({...this.env,IMPORTS:this.objects},expected,{billing:()=>fetchHostedFreeGuard(this.env.CLOUDFLARE_READ_TOKEN,baseline)});}
 }
 
 async function isAuthorized(request,env){
@@ -183,7 +215,7 @@ export default {
         const {key,value,revision}=await boundedJson(request,2_000_000);
         if(typeof key!=='string'||!Number.isSafeInteger(revision)||revision<0)throw Error('A public resource key and revision are required');
         validatePublicSeed(key,value);
-        return response(await env.PUBLIC_CACHE.getByName(PUBLIC_CACHE_PREFIX+key).seed(key,value,revision));
+        return response(await env.PUBLIC_CACHE.getByName(PUBLIC_CACHE_CONTENT_V2).seed(key,value,revision));
       }
       const stub=coordinator(env);
       if(url.pathname==='/status'&&request.method==='GET')return response(await stub.status());

@@ -17,7 +17,8 @@ test('scoped public mutations through authenticated API routes at 4.6m reads',as
     bindings:{SESS_SECRET:'scoped-test-session-secret',PASSWORD_PEPPER:'scoped-test-password-pepper',RESET_SECRET:'scoped-test-reset-secret',
       ALLOWED_ORIGINS:'https://qamous.org',APP_URL:'https://qamous.org',ENABLE_AI:'false',
       READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0',
-      PUBLIC_CACHE_WRITE_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),PUBLIC_CACHE_WRITE_BOOTSTRAP_ROWS:'0'},
+      PUBLIC_CACHE_WRITE_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),PUBLIC_CACHE_WRITE_BOOTSTRAP_ROWS:'0',
+      AUXILIARY_WRITE_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),AUXILIARY_WRITE_BOOTSTRAP_ROWS:'0'},
     outboundService:()=>{throw new Error('Scoped mutation tests must not contact external services');}}));
   t.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB');

@@ -155,7 +155,7 @@ test('tier classification preserves legacy/global spend and restores only unused
   const admitted=upgraded.reserve(claim(1,'import'),start);assert.equal(admitted.allowed,true);upgraded.settle(admitted.id,0,0,start);
   const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
   assert.equal(restart.status(start).usage.ledgerRows,53952);assert.equal(restart.status(start).usage.tierLedgerRows.import,2984);
-  changeState(f,day,state=>{state.ledgerRows+=3072;state.tierLedgerRows.public+=3072;});
+  changeState(f,day,state=>{state.ledgerRows+=9072;state.tierLedgerRows.public+=9072;});
   assert.equal(restart.reserve(claim(1,'import'),start).reason,'do_storage_budget');
   assert.equal(restart.reserve(claim(1,'essential'),start).allowed,true,'combined nonessential spend preserves the essential allocation');
   f.db.close();
@@ -186,6 +186,28 @@ test('public cache storage pool reserves counter writes, protects essential head
   for(const [cost,tier] of [[0,'public'],[-1,'public'],[513,'public'],[1,'import'],[NaN,'essential']])assert.equal(restart.reservePublicCacheWrites(cost,tier,start),false);
   assert.equal(restart.reservePublicCacheWrites(1,'public',start+86400000),true);
   assert.equal(restart.status(start+86400000).publicCacheWrites.charged,2,'new-day admission writes only its precharged counter');
+  f.db.close();
+});
+
+test('auxiliary storage precharges its counter and isolates runtime, importer and revision limits across restarts',()=>{
+  const f=fixture(1234);
+  assert.equal(f.ledger.reserveAuxiliaryWrites(1,'runtime',start),false,'a new pool cannot assume zero previous usage');
+  const ledger=new ReadBudgetLedger(f.store,{day,rows:0,auxiliaryDay:day,auxiliaryRows:2000},()=>{});
+  const beforeD1=ledger.status(start).usage;
+  for(let n=0;n<600;n++)assert.equal(ledger.reserveAuxiliaryWrites(4,'runtime',start),true);
+  assert.equal(ledger.status(start).auxiliaryWrites.runtime,3000);
+  let before=f.db.prepare('SELECT total_changes() n').get().n;
+  for(let n=0;n<1000;n++)assert.equal(ledger.reserveAuxiliaryWrites(1,'runtime',start),false);
+  assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0,auxiliaryDay:day,auxiliaryRows:0},()=>{});
+  assert.equal(restart.status(start).auxiliaryWrites.unknown,2001);
+  assert.equal(restart.reserveAuxiliaryWrites(12,'import',start),true,'runtime exhaustion cannot consume the import allocation');
+  for(let n=0;n<200;n++)assert.equal(restart.reserveAuxiliaryWrites(14,'revision',start),true);
+  assert.equal(restart.reserveAuxiliaryWrites(1,'revision',start),false);
+  assert.deepEqual(restart.status(start).usage,beforeD1);
+  for(const [cost,kind] of [[0,'import'],[-1,'runtime'],[513,'revision'],[1,'public'],[NaN,'import']])assert.equal(restart.reserveAuxiliaryWrites(cost,kind,start),false);
+  assert.equal(restart.reserveAuxiliaryWrites(12,'import',start+86400000),true);
+  assert.equal(restart.status(start+86400000).auxiliaryWrites.charged,13);
   f.db.close();
 });
 

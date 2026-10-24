@@ -2,7 +2,8 @@
 
 ## Restoring normal operation
 
-Normal operation uses prepared public cards and the mutable shared cache. To
+Normal operation uses prepared public cards and a resource-keyed mutable shared
+cache, with bounded hot memory and schema creation included in admission. To
 leave emergency snapshot mode, deploy the reviewed API with
 `node scripts/deploy.mjs --restore-reads`: this opens public reads while explicitly
 keeping every mutation paused. Keep ingestion paused with an empty cron list.
@@ -99,8 +100,8 @@ Once SQL is submitted, an unknown result retains its full reservation.
 
 The compact ledger allocates eight conservative SQLite row-write units per
 admitted lifecycle, up to 64,000 daily. Public and import work together may use
-48,000 of those; import work itself may use 32,000. Essential operations can use
-the remaining 16,000. The import ceiling applies to import consumption, rather
+54,000 of those; import work itself may use 32,000. Essential operations retain
+10,000. The import ceiling applies to import consumption, rather
 than accidentally including unrelated essential maintenance. Existing legacy
 allocations retain their original 32-unit charge, including unclassified work;
 deployments cannot erase spent capacity. Actual successful compact lifecycles
@@ -117,6 +118,30 @@ work before installation. A normal entry uses one direct SQLite row; large
 entries use bounded atomic chunks. Identical refreshes do not rewrite payloads
 or refresh metadata every fifteen minutes. A denied persistence grant can serve
 a fresh result in memory without authorizing an uncharged storage write.
+
+Rate counters, import checkpoints and revision coordination share a further
+12,000-unit daily pool, with separate 3,000/6,000/3,000 ceilings. Their grants
+include the counter write and precede the operation. Scheduled imports waiting
+for a future quota window do not rewrite their checkpoint every minute. Thus
+the three allocations total 96,000, leaving 4,000 units for startup and safety
+within the 100,000-row account allowance. Conservative initial-day baselines
+retain earlier work; these controls do not reset provider usage. Explicit
+administrative staging and migrations remain separately controlled operations.
+
+Admitting a content mutation also prepays its eventual barrier completion and
+credit bookkeeping. These durable holds survive restarts and are carried into
+the next UTC day's allocation before other work is admitted. Finishing or
+expiring an admitted mutation therefore does not require new daily capacity.
+Unknown acknowledgements retain their conservative hold. No-op public reads
+avoid extra credit requests except for a bounded reconciliation sweep.
+
+The shared cache limits hot content to 128 resources and an 8 MB conservative
+memory estimate. A bounded revision-and-SHA-256 freshness memo prevents LRU
+eviction from repeatedly reloading unchanged pages from D1. Persisted content
+must match the memo's digest; failed changed writes cannot freshen old values.
+New or growing cache entries stop before 200 MB of SQL storage, while existing
+entries may still renew or shrink. Reclaiming old entries is an explicit bounded
+maintenance task; this storage guard does not promise unlimited cache growth.
 
 Cached values can fall back for seven days only under their unchanged scoped
 revision. Moderation and edits invalidate their affected scopes, so withdrawn

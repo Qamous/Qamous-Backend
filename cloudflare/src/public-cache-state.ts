@@ -12,6 +12,8 @@ export interface AtomicPublicCacheStore {
   writeEntry(entry:StoredPublicCacheEntry,tier:'public'|'essential'):Promise<boolean>;
 }
 export type PublicCacheStore=LegacyPublicCacheStore|AtomicPublicCacheStore;
+export interface PublicCacheFreshness {revision:number;freshUntil:number;staleUntil:number;digest:string;}
+export interface PublicFreshnessMemo {get():PublicCacheFreshness|undefined;put(value:PublicCacheFreshness):void;}
 export type CacheResult<T> = { value: T; state: 'hit' | 'miss' | 'stale' | 'coalesced' };
 const CHUNK_SIZE = 20_000;
 const MAX_BYTES = 16_000_000;
@@ -25,7 +27,16 @@ export class PublicCacheState {
   private clock: () => number;
   private memory?:StoredPublicCacheEntry&{value:unknown};
   private durable?:StoredPublicCacheEntry;
-  constructor(store: PublicCacheStore,clock: () => number = Date.now) {this.store=store;this.clock=clock;}
+  private memoryChanged?:(bytes:number)=>void;
+  private freshness?:PublicFreshnessMemo;
+  constructor(store: PublicCacheStore,clock: () => number = Date.now,memoryChanged?:(bytes:number)=>void,freshness?:PublicFreshnessMemo) {this.store=store;this.clock=clock;this.memoryChanged=memoryChanged;this.freshness=freshness;}
+  private async digest(json:string):Promise<string> {return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json)))].map(value=>value.toString(16).padStart(2,'0')).join('');}
+  releaseMemory():void {this.memory=undefined;this.durable=undefined;}
+  private remember(entry:StoredPublicCacheEntry) {
+    const memory={...entry,value:freezePublicValue(JSON.parse(entry.json))};this.memory=memory;
+    this.memoryChanged?.(new TextEncoder().encode(entry.json).byteLength*4);
+    return memory;
+  }
 
   private async stored<T>(action: () => Promise<T>): Promise<T> {
     const previous = this.storageTail;
@@ -53,7 +64,8 @@ export class PublicCacheState {
           stored=await this.store.writeEntry(entry,tier);
           if(stored)this.durable=entry;
         } else this.durable=previous;
-        this.memory={...entry,value:freezePublicValue(JSON.parse(json))};
+        if(this.freshness)this.freshness.put({revision,freshUntil:record.freshUntil,staleUntil:record.staleUntil,digest:await this.digest(json)});
+        this.remember(entry);
         this.retryAt.delete(revision);
         return stored;
       }
@@ -109,10 +121,13 @@ export class PublicCacheState {
       if(this.memory?.record.revision===revision&&this.memory.record.staleUntil>this.clock())return this.memory as {record:CacheRecord;value:T};
       const entry=await this.store.readEntry();
       if(!entry)return;
-      this.durable=entry;
+      this.durable={...entry,record:{...entry.record}};
+      const memo=this.freshness?.get();
+      if(memo&&entry.record.revision===memo.revision&&memo.revision===revision&&memo.staleUntil>this.clock()&&memo.digest===await this.digest(entry.json)) {
+        entry.record={...entry.record,freshUntil:memo.freshUntil,staleUntil:memo.staleUntil};
+      }
       if(entry.record.revision!==revision||entry.record.staleUntil<=this.clock())return;
-      this.memory={...entry,value:freezePublicValue(JSON.parse(entry.json))};
-      return this.memory as {record:CacheRecord;value:T};
+      return this.remember(entry) as {record:CacheRecord;value:T};
     }
     const record = await this.store.get<CacheRecord>('record');
     if (!record || record.revision !== revision || record.staleUntil <= this.clock()) return;

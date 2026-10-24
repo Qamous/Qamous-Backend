@@ -6,10 +6,11 @@ export const READ_BUDGET_POLICY=Object.freeze({
   publicRows:4_500_000,totalRows:4_900_000,importStopRows:3_500_000,
   minuteRows:250_000,essentialMinuteRows:50_000,maxConcurrent:6,publicConcurrent:4,importConcurrent:1,
   leaseMs:60_000,resetQuietMs:60_000,defaultQueryRows:50_000,maxReservationRows:250_000,
-  ledgerPublicOperations:6000,ledgerTotalOperations:8000,ledgerImportOperations:4000,
+  ledgerPublicOperations:6750,ledgerTotalOperations:8000,ledgerImportOperations:4000,
   ledgerRowsPerOperation:8,ledgerWarningOperations:4000,
-  ledgerPublicRows:48_000,ledgerTotalRows:64_000,ledgerImportRows:32_000,
+  ledgerPublicRows:54_000,ledgerTotalRows:64_000,ledgerImportRows:32_000,
   cachePublicRows:16_000,cacheTotalRows:20_000,
+  auxiliaryTotalRows:12_000,auxiliaryRuntimeRows:3_000,auxiliaryImportRows:6_000,auxiliaryRevisionRows:3_000,
 });
 type SqlValue=string|number|null;
 interface SqlStore {exec<T extends Record<string,SqlValue>=Record<string,SqlValue>>(query:string,...values:SqlValue[]):{toArray():T[];one():T};}
@@ -29,12 +30,14 @@ export class ReadBudgetLedger {
   private store:Store;private emit:(event:Record<string,unknown>)=>void;
   private hasLegacyLeases=false;
   private deniedDay='';private deniedCount=0;private denialEvents=new Map<string,number>();
-  constructor(store:Store,bootstrap:{day?:string;rows?:number;cacheDay?:string;cacheRows?:number},emit:(event:Record<string,unknown>)=>void=event=>console.log(JSON.stringify(event))) {
+  constructor(store:Store,bootstrap:{day?:string;rows?:number;cacheDay?:string;cacheRows?:number;auxiliaryDay?:string;auxiliaryRows?:number},emit:(event:Record<string,unknown>)=>void=event=>console.log(JSON.stringify(event))) {
     this.store=store;this.emit=emit;
     const sql=store.sql;
     sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_days(day TEXT PRIMARY KEY,state TEXT NOT NULL) WITHOUT ROWID');
     sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER) WITHOUT ROWID');
     sql.exec('CREATE TABLE IF NOT EXISTS public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL) WITHOUT ROWID');
+    sql.exec('CREATE TABLE IF NOT EXISTS auxiliary_write_days(day TEXT PRIMARY KEY,state TEXT NOT NULL) WITHOUT ROWID');
+    sql.exec('CREATE TABLE IF NOT EXISTS revision_write_holds(id TEXT PRIMARY KEY,day TEXT NOT NULL,cost INTEGER NOT NULL) WITHOUT ROWID');
     // Legacy tables remain read-only evidence. Copy each existing day exactly
     // once and carry all previously spent lifecycle allocations at the OLD
     // 32-row rate. Deploying this change cannot reset today's storage budget.
@@ -71,6 +74,62 @@ export class ReadBudgetLedger {
     });
     if(bootstrap.day&&/^\d{4}-\d{2}-\d{2}$/.test(bootstrap.day)&&validInteger(bootstrap.rows)&&!this.get(bootstrap.day))this.save(empty(bootstrap.day,bootstrap.rows));
     if(bootstrap.cacheDay&&/^\d{4}-\d{2}-\d{2}$/.test(bootstrap.cacheDay)&&validInteger(bootstrap.cacheRows))sql.exec('INSERT OR IGNORE INTO public_cache_write_days(day,charged) VALUES(?,?)',bootstrap.cacheDay,bootstrap.cacheRows+1);
+    if(bootstrap.auxiliaryDay&&/^\d{4}-\d{2}-\d{2}$/.test(bootstrap.auxiliaryDay)&&validInteger(bootstrap.auxiliaryRows))sql.exec('INSERT OR IGNORE INTO auxiliary_write_days(day,state) VALUES(?,?)',bootstrap.auxiliaryDay,JSON.stringify({charged:bootstrap.auxiliaryRows+1,runtime:0,import:0,revision:0,unknown:bootstrap.auxiliaryRows+1}));
+  }
+  private auxiliaryState(day:string) {
+    const sql=this.store.sql,current=sql.exec('SELECT state FROM auxiliary_write_days WHERE day=?',day).toArray()[0];
+    if(current)return JSON.parse(String(current.state));
+    if(!sql.exec('SELECT day FROM auxiliary_write_days WHERE day<? ORDER BY day DESC LIMIT 1',day).toArray().length)return null;
+    // An unfinished mutation carries its already promised completion and the
+    // eventual hold deletion into every UTC day until acknowledged. Other
+    // kinds cannot consume these rows first after midnight.
+    const carry=Number(sql.exec('SELECT COALESCE(SUM(cost+1),0) AS n FROM revision_write_holds WHERE day<?',day).one().n);
+    return {charged:carry,runtime:0,import:0,revision:carry,unknown:0};
+  }
+  revisionWriteCredits():{id:string;cost:number}[] {
+    return this.store.sql.exec<{id:string;cost:number}>('SELECT id,cost FROM revision_write_holds ORDER BY id LIMIT 128').toArray();
+  }
+  reserveRevisionLifecycle(id:string,cost:number,completion:number,now=Date.now()):boolean {
+    if(typeof id!=='string'||!/^(?:scoped|legacy)-[a-zA-Z0-9-]{8,80}$/.test(id)||!validInteger(cost)||cost>1024||!validInteger(completion)||completion<1||completion>1024)return false;
+    return this.store.transactionSync(()=>{
+      const sql=this.store.sql,day=dayAt(now),state=this.auxiliaryState(day);if(!state)return false;
+      const hold=sql.exec<{cost:number}>('SELECT cost FROM revision_write_holds WHERE id=?',id).toArray()[0];
+      if(!hold&&Number(sql.exec('SELECT COUNT(*) AS n FROM revision_write_holds').one().n)>=128)return false;
+      const growth=Math.max(0,completion-Number(hold?.cost||0));
+      // One day-counter write, a new/expanded hold, and its eventual deletion.
+      const allocation=cost+growth+1+(growth?1:0)+(hold?0:1);
+      if(state.charged+allocation>READ_BUDGET_POLICY.auxiliaryTotalRows||state.revision+allocation>READ_BUDGET_POLICY.auxiliaryRevisionRows)return false;
+      state.charged+=allocation;state.revision+=allocation;
+      if(growth)sql.exec('INSERT INTO revision_write_holds(id,day,cost) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET cost=excluded.cost',id,day,completion);
+      sql.exec('INSERT INTO auxiliary_write_days(day,state) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET state=excluded.state',day,JSON.stringify(state));
+      return true;
+    });
+  }
+  completeRevisionLifecycle(id:string,now=Date.now()):boolean {
+    return this.store.transactionSync(()=>{
+      const sql=this.store.sql,hold=sql.exec('SELECT id FROM revision_write_holds WHERE id=?',id).toArray()[0];if(!hold)return false;
+      const day=dayAt(now),current=sql.exec('SELECT day FROM auxiliary_write_days WHERE day=?',day).toArray()[0];
+      if(!current) {
+        const state=this.auxiliaryState(day);if(!state)return false;
+        // First operation of a UTC day may itself be an old completion. Its
+        // fixed rollover row is charged before deleting the carried hold.
+        state.charged++;state.revision++;
+        sql.exec('INSERT INTO auxiliary_write_days(day,state) VALUES(?,?)',day,JSON.stringify(state));
+      }
+      sql.exec('DELETE FROM revision_write_holds WHERE id=?',id);
+      return true;
+    });
+  }
+  reserveAuxiliaryWrites(cost:number,kind:'runtime'|'import'|'revision',now=Date.now()):boolean {
+    if(!validInteger(cost)||cost<1||cost>512||!['runtime','import','revision'].includes(kind))return false;
+    return this.store.transactionSync(()=>{
+      const sql=this.store.sql,day=dayAt(now),state=this.auxiliaryState(day),allocation=cost+1;if(!state)return false;
+      const ceiling=kind==='runtime'?READ_BUDGET_POLICY.auxiliaryRuntimeRows:kind==='import'?READ_BUDGET_POLICY.auxiliaryImportRows:READ_BUDGET_POLICY.auxiliaryRevisionRows;
+      if(state.charged+allocation>READ_BUDGET_POLICY.auxiliaryTotalRows||state[kind]+allocation>ceiling)return false;
+      state.charged+=allocation;state[kind]+=allocation;
+      sql.exec('INSERT INTO auxiliary_write_days(day,state) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET state=excluded.state',day,JSON.stringify(state));
+      return true;
+    });
   }
   reservePublicCacheWrites(cost:number,tier:'public'|'essential',now=Date.now()):boolean {
     if(!validInteger(cost)||cost<1||cost>512||!['public','essential'].includes(tier))return false;
@@ -214,6 +273,7 @@ export class ReadBudgetLedger {
   status(now=Date.now()) {
     const state=this.current(now,false),{minutes:_minutes,routes:_routes,active:_active,cleanupCursor:_cursor,...usage}=state||{};
     const cache=this.store.sql.exec('SELECT charged FROM public_cache_write_days WHERE day=?',dayAt(now)).toArray()[0];
-    return {day:dayAt(now),initialized:!!state,policy:READ_BUDGET_POLICY,usage:state?{...usage,denied:state.denied+(this.deniedDay===state.day?this.deniedCount:0)}:null,publicCacheWrites:{initialized:!!cache,charged:cache?Number(cache.charged):null},denialAccounting:'Current-process counts plus legacy persisted counts; bounded events are emitted without storage writes.',active:state?Object.values(state.active).filter(a=>a.started>=now-READ_BUDGET_POLICY.leaseMs).length:0,routes:state?Object.values(state.routes).sort((a,b)=>b.charged-a.charged).slice(0,100):[]};
+    const auxiliary=this.store.sql.exec('SELECT state FROM auxiliary_write_days WHERE day=?',dayAt(now)).toArray()[0];
+    return {day:dayAt(now),initialized:!!state,policy:READ_BUDGET_POLICY,usage:state?{...usage,denied:state.denied+(this.deniedDay===state.day?this.deniedCount:0)}:null,publicCacheWrites:{initialized:!!cache,charged:cache?Number(cache.charged):null},auxiliaryWrites:auxiliary?{initialized:true,...JSON.parse(String(auxiliary.state))}:{initialized:false,charged:null},denialAccounting:'Current-process counts plus legacy persisted counts; bounded events are emitted without storage writes.',active:state?Object.values(state.active).filter(a=>a.started>=now-READ_BUDGET_POLICY.leaseMs).length:0,routes:state?Object.values(state.routes).sort((a,b)=>b.charged-a.charged).slice(0,100):[]};
   }
 }

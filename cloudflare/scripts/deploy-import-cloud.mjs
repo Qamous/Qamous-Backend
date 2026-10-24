@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {validateProof,validateImportPause,ACCOUNT_ID} from './free-plan-guard.mjs';
 import {verifyPublicSnapshotUnpause} from './public-snapshot-deploy-guard.mjs';
 import {validateLiveImportState,validateImportApiReady} from './import-deploy-transition.mjs';
-import {importDeploymentArgs,verifyImportDeploymentFlags} from './import-deploy-variables.mjs';
+import {importDeploymentArgs,verifyImportDeploymentFlags,pausedImportConfiguration} from './import-deploy-variables.mjs';
 import {IMPORT_DATABASE,IMPORT_MANIFEST} from '../src/import-cloud-policy.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const privateRoot=new URL('../private/cloud-import/',import.meta.url);
@@ -18,10 +18,12 @@ function command(args,input){
   if(r.status!==0)throw Error('Wrangler operation failed: '+String(r.stderr||r.stdout).replace(/Bearer\s+\S+/g,'Bearer [withheld]').slice(-1500));
   return r.stdout;
 }
-const mode=process.argv[2];if(!['--deploy','--recover-monitor'].includes(mode)||process.argv.length!==3)throw Error('Use --deploy or --recover-monitor explicitly');
+const mode=process.argv[2];if(!['--deploy','--deploy-paused','--recover-monitor'].includes(mode)||process.argv.length!==3)throw Error('Use --deploy, --deploy-paused or --recover-monitor explicitly');
 const proof=await readJson(new URL('../private/billing-proof.json',import.meta.url));validateProof(proof);
-const config=await readJson(configPath);
-const deployArgs=importDeploymentArgs(configPath,config.vars);
+const sourceConfig=await readJson(configPath);validateImportPause(sourceConfig);
+const config=mode==='--deploy-paused'?pausedImportConfiguration(sourceConfig):sourceConfig;
+const deployPath=mode==='--deploy-paused'?fileURLToPath(new URL('paused-deploy-'+randomBytes(8).toString('hex')+'.json',privateRoot)):configPath;
+const deployArgs=importDeploymentArgs(deployPath,config.vars);
 const paused=validateImportPause(config);
 await verifyPublicSnapshotUnpause(config);
 if(config.name!=='qamous-import'||config.account_id!==ACCOUNT_ID||config.main!=='src/import-host.mjs'||config.d1_databases?.length!==1||config.d1_databases[0].database_id!==IMPORT_DATABASE||config.durable_objects?.bindings?.length!==3||config.durable_objects.bindings[0].class_name!=='QamousImportState'||config.durable_objects.bindings[1].name!=='READ_BUDGET'||config.durable_objects.bindings[1].class_name!=='QamousReadBudget'||config.durable_objects.bindings[1].script_name!=='qamous-api'||config.durable_objects.bindings[2].name!=='PUBLIC_CACHE'||config.durable_objects.bindings[2].class_name!=='QamousPublicCache'||config.durable_objects.bindings[2].script_name!=='qamous-api'||config.migrations?.length!==1||config.migrations[0].tag!=='v1'||JSON.stringify(config.migrations[0].new_sqlite_classes)!=='["QamousImportState"]'||config.preview_urls!==false||config.workers_dev!==true||config.routes?.length||['ai','r2_buckets','assets','kv_namespaces','queues','workflows','vectorize','hyperdrive','containers','pipelines'].some(key=>config[key]))throw Error('Importer configuration exceeds its approved resources');
@@ -44,6 +46,12 @@ if(mode==='--recover-monitor'){
   console.log(JSON.stringify({monitorRecovered:true,readOnlyWorkerSecretPreserved:true}));
 }else{
   if(!access||access.jobHash!==config.vars.IMPORT_JOB_HASH)throw Error('Recover the private monitoring credential before deployment');
+  if(mode==='--deploy-paused') {
+    // The reviewed source identity is checked above. Only this explicit pause
+    // changes scheduling; an absolute entry path preserves module resolution
+    // when the generated configuration is stored in the ignored private folder.
+    await writeFile(deployPath,JSON.stringify({...config,main:fileURLToPath(new URL('../'+config.main,import.meta.url))},null,2)+'\n',{flag:'wx'});
+  }
   if(paused) {
     // The DO may already be out of writes. A pause-only release needs no DO
     // status read: identity is verified above and it changes no stored job data.
