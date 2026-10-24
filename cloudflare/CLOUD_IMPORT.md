@@ -12,6 +12,18 @@ A daytime quota hold now wakes at 22:00 UTC instead of sleeping through the enti
 
 ## Monitoring and deployment
 
+Before starting a packet, the importer checks both provider usage and remaining
+shared ledger capacity. Ordinary quota waits resume automatically at the next
+eligible window. A one-time accounting-policy upgrade can reassess an old quota
+hold, but never clears an uncertain in-flight transaction or integrity halt.
+
+A proven refusal before SQL submission clears its in-flight marker without
+charging 10,000 nonexistent writes. A successful batch persists its measured
+cost and receipt before identity or integrity checks can fail; replay does not
+charge that receipt twice. Lost SQL acknowledgements still retain the full
+conservative reservation. No source rows, future-language fields, examples or
+provenance are discarded to reduce cost.
+
 From this directory, run `node scripts/cloud-import-status.mjs`. Check `lastScheduledAt`, `lastSuccessAt`, `cursor`, `nextAttemptAt`, `quotaPolicy`, and `staging.consumedPagesDeleted`. Status is authenticated and local credentials stay under ignored `private/cloud-import/`; do not publish that folder.
 
 For a reviewed code update, first verify Workers Free Active in the signed-in account dashboard and save genuine evidence in `private/billing-proof.json`. Then run `node scripts/deploy-import-cloud.mjs --deploy`. The helper enforces the existing account/database/namespace/job/cron identities and refuses additional resource bindings. It records the prior version and checkpoint, performs a dry run, preserves existing Worker secrets, and verifies cursor, record-count and cleanup continuity afterward. It never stages new vocabulary or applies schema migrations.

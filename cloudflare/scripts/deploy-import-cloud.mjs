@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {validateProof,validateImportPause,ACCOUNT_ID} from './free-plan-guard.mjs';
 import {verifyPublicSnapshotUnpause} from './public-snapshot-deploy-guard.mjs';
 import {validateLiveImportState,validateImportApiReady} from './import-deploy-transition.mjs';
+import {importDeploymentArgs,verifyImportDeploymentFlags} from './import-deploy-variables.mjs';
 import {IMPORT_DATABASE,IMPORT_MANIFEST} from '../src/import-cloud-policy.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const privateRoot=new URL('../private/cloud-import/',import.meta.url);
@@ -20,6 +21,7 @@ function command(args,input){
 const mode=process.argv[2];if(!['--deploy','--recover-monitor'].includes(mode)||process.argv.length!==3)throw Error('Use --deploy or --recover-monitor explicitly');
 const proof=await readJson(new URL('../private/billing-proof.json',import.meta.url));validateProof(proof);
 const config=await readJson(configPath);
+const deployArgs=importDeploymentArgs(configPath,config.vars);
 const paused=validateImportPause(config);
 await verifyPublicSnapshotUnpause(config);
 if(config.name!=='qamous-import'||config.account_id!==ACCOUNT_ID||config.main!=='src/import-host.mjs'||config.d1_databases?.length!==1||config.d1_databases[0].database_id!==IMPORT_DATABASE||config.durable_objects?.bindings?.length!==3||config.durable_objects.bindings[0].class_name!=='QamousImportState'||config.durable_objects.bindings[1].name!=='READ_BUDGET'||config.durable_objects.bindings[1].class_name!=='QamousReadBudget'||config.durable_objects.bindings[1].script_name!=='qamous-api'||config.durable_objects.bindings[2].name!=='PUBLIC_CACHE'||config.durable_objects.bindings[2].class_name!=='QamousPublicCache'||config.durable_objects.bindings[2].script_name!=='qamous-api'||config.migrations?.length!==1||config.migrations[0].tag!=='v1'||JSON.stringify(config.migrations[0].new_sqlite_classes)!=='["QamousImportState"]'||config.preview_urls!==false||config.workers_dev!==true||config.routes?.length||['ai','r2_buckets','assets','kv_namespaces','queues','workflows','vectorize','hyperdrive','containers','pipelines'].some(key=>config[key]))throw Error('Importer configuration exceeds its approved resources');
@@ -46,9 +48,10 @@ if(mode==='--recover-monitor'){
     // The DO may already be out of writes. A pause-only release needs no DO
     // status read: identity is verified above and it changes no stored job data.
     await writeFile(new URL('pre-snapshot-pause-deployment.json',privateRoot),JSON.stringify({verifiedAt:new Date().toISOString(),settings,deployments:await platform('/deployments')},null,2)+'\n');
-    console.log(command(['deploy','--config',configPath,'--keep-vars','--dry-run']));
-    console.log(command(['deploy','--config',configPath,'--keep-vars']));
+    console.log(command([...deployArgs,'--dry-run']));
+    console.log(command(deployArgs));
     const afterSettings=await platform('/settings');validateImportPause(config,(await platform('/schedules')).schedules);
+    verifyImportDeploymentFlags(afterSettings,config.vars);
     if(afterSettings.bindings.find(b=>b.name==='PUBLIC_READ_ONLY')?.text!=='true')throw Error('Importer pause was not published');
     const check=await fetch(access.url+'/tick',{method:'POST',headers:{Authorization:'Bearer '+access.adminToken},signal:AbortSignal.timeout(20000)});
     if(check.status!==503||(await check.json()).code!=='PUBLIC_READ_ONLY')throw Error('Paused importer still permits dynamic operations');
@@ -59,9 +62,10 @@ if(mode==='--recover-monitor'){
   const status=async()=>{const r=await fetch(access.url+'/status',{headers:{Authorization:'Bearer '+access.adminToken},signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error('Private importer status failed: '+r.status);return r.json();};
   const before=await status();if(before.manifestHash!==IMPORT_MANIFEST||before.jobHash!==access.jobHash||before.halted)throw Error('Existing import is not in a verified deployable state');
   await writeFile(new URL('pre-catchup-deployment.json',privateRoot),JSON.stringify({verifiedAt:new Date().toISOString(),settings,deployments:await platform('/deployments'),before},null,2)+'\n');
-  console.log(command(['deploy','--config',configPath,'--keep-vars','--dry-run']));
-  console.log(command(['deploy','--config',configPath,'--keep-vars']));
+  console.log(command([...deployArgs,'--dry-run']));
+  console.log(command(deployArgs));
   const afterSettings=await platform('/settings');
+  verifyImportDeploymentFlags(afterSettings,config.vars);
   if(afterSettings.bindings.find(b=>b.name==='PUBLIC_READ_ONLY')?.text!=='false')throw Error('Importer unpause was not published');
   validateImportPause(config,(await platform('/schedules')).schedules);
   const after=await status();

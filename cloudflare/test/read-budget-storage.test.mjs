@@ -22,6 +22,18 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
         const sql=this.ctx.storage.sql,ledger=this.ledger;
         const change=(day,mutate)=>{const state=JSON.parse(sql.exec('SELECT state FROM read_budget_compact_days WHERE day=?',day).one().state);mutate(state);sql.exec('UPDATE read_budget_compact_days SET state=? WHERE day=?',JSON.stringify(state),day);};
         const claim=(id,tier='public')=>({id:'request-'+id,rows:1,route:'/measured',tier});
+        if(scenario==='cache-pool') {
+          const before=this.writes;
+          const cacheLedger=new ReadBudgetLedger(this.store,{day,rows:0,cacheDay:day,cacheRows:0},()=>{});
+          let admissions=0;
+          while(cacheLedger.reservePublicCacheWrites(1,'public',now))admissions++;
+          const publicAdmissions=admissions;
+          while(cacheLedger.reservePublicCacheWrites(1,'essential',now))admissions++;
+          const capped=this.writes;
+          for(let n=0;n<1000;n++)if(cacheLedger.reservePublicCacheWrites(1,'essential',now))throw Error('Cache pool bypass');
+          const status=cacheLedger.status(now);
+          return {scenario,publicAdmissions,admissions,writes:capped-before,denialWrites:this.writes-capped,charged:status.publicCacheWrites.charged,d1Operations:status.usage.operations};
+        }
         if(scenario==='rollover-denials') {
           for(let n=0;n<1500;n++)sql.exec("INSERT INTO read_budget_compact_leases(id,day,tier,route,reserved,started,minute,status) VALUES(?,?,'public','/old',3000,?,?,'unknown')",'old-'+n,day,now,Math.floor(now/60000));
           change(day,state=>{state.unresolved=4500000;state.charged=4500000;});
@@ -84,4 +96,10 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
   assert.ok(rollover.writes<=1,'rollover may insert only its one durable carry row');
   assert.ok(rollover.restartReads<=25_000,'cold refusals must not rescan historical leases');
   assert.equal(rollover.restartWrites,0);
+  const cacheResponse=await mf.dispatchFetch('https://local/cache-pool');assert.equal(cacheResponse.status,200,await cacheResponse.clone().text());
+  const cache=await cacheResponse.json();t.diagnostic(JSON.stringify(cache));
+  assert.equal(cache.publicAdmissions,7999);assert.equal(cache.admissions,9999);
+  assert.equal(cache.writes,cache.admissions+1,'one row per admission plus the initial counter row');
+  assert.equal(cache.charged,cache.writes+cache.admissions,'the pool reserves every counter write and every promised cache-row write');
+  assert.equal(cache.denialWrites,0);assert.equal(cache.d1Operations,0);
 });

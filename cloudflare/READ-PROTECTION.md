@@ -1,5 +1,23 @@
 # Public reads and D1 quota protection
 
+## Restoring normal operation
+
+Normal operation uses prepared public cards and the mutable shared cache. To
+leave emergency snapshot mode, deploy the reviewed API with
+`node scripts/deploy.mjs --restore-reads`: this opens public reads while explicitly
+keeping every mutation paused. Keep ingestion paused with an empty cron list.
+Its authenticated public-cache revision and seed endpoints can warm the cache
+without running import SQL. Check every seed acknowledgement and the final
+revision before proceeding.
+
+The frontend's audited `withdraw` operation archives its generated snapshot
+assets and removes static authority. Its normal deployment checks live API
+reads and verifies that mutations and imports remain paused throughout this
+transition. Only after that release may a normal API deployment set
+`PUBLIC_WRITES_PAUSED=false`, followed by the separately guarded importer release.
+The regular API/importer deployment guards refuse writes while the live frontend
+still advertises a snapshot. No calendar date automatically opens these switches.
+
 ## October 23 recovery pause
 
 The October 23 outage exhausted Durable Object SQLite writes, a separate quota
@@ -79,35 +97,33 @@ Once SQL is submitted, an unknown result retains its full reservation.
 
 ## Protecting the ledger's storage allowance
 
-An independent, persistent daily operation counter bounds the ledger's own work.
-Imports stop when the shared counter reaches 1,000, public operations at 1,500,
-and essential operations at 2,000. Successful admissions consume a unit even
-when D1 reports zero reads or the caller fails before submitting SQL. The policy
-allocates 32 conservative SQLite row-write units per operation: at most 64,000
-allocated units for that ledger per day, leaving room within the account's
-100,000-row allowance for other namespaces and overhead. This is a conservative
-application allocation, not Cloudflare's provider-wide billing counter.
-Local Workers-runtime measurements observed 17 written rows for reserve, unknown
-result and final settlement; the fixture including old-row cleanup and both
-threshold alerts used 23. A 2,000-operation run used 24,004 written rows, and
-1,000 subsequent denials wrote zero. Recheck these measurements when changing
-the ledger schema or lifecycle.
+The compact ledger allocates eight conservative SQLite row-write units per
+admitted lifecycle, up to 64,000 daily. Public and import work together may use
+48,000 of those; import work itself may use 32,000. Essential operations can use
+the remaining 16,000. The import ceiling applies to import consumption, rather
+than accidentally including unrelated essential maintenance. Existing legacy
+allocations retain their original 32-unit charge, including unclassified work;
+deployments cannot erase spent capacity. Actual successful compact lifecycles
+use four rows; unknown-result and cleanup paths remain within eight.
 
-Denied reservations do not write per-attempt counters, expire leases or clean up
-history. The first valid reservation after UTC rollover may insert one durable
-day row carrying unresolved reservations, even when that request is refused.
-Persisting this carry prevents repeated refusals from rescanning yesterday's
-leases after an object restarts. With 1,500 historical unresolved leases, 1,000
-rollover refusals used 2,501 rows read and two rows written; another 1,000 refusals
-from newly constructed ledger instances used 1,000 reads and zero writes.
-Read-only status previews memoize their conservative carry until a meaningful
-mutation, while persisted current-day counters always take precedence.
-Repeated unknown settlements and status calls remain read only. Denial counts
-and log throttles are volatile; they reset when the object restarts. Admitted
-operations remove at most one old row from each ledger table. A settlement from a previous
-UTC day must consume a new operation unit before updating stored accounting;
-when refused, it retains its original D1 reservation. Existing query totals
-initialize the new counter so deploying this protection cannot reset usage.
+Denied admissions and repeated unknown settlements write no counters. New UTC
+days retain unresolved D1 reservations, including across object restarts. These
+are conservative application allocations, not Cloudflare billing readings.
+
+Public cache persistence has its own durable 20,000-row daily allocation,
+including the budget counter: public fills stop at 16,000 and essential mutation
+publication retains 4,000. An explicit initial-day baseline accounts for cache
+work before installation. A normal entry uses one direct SQLite row; large
+entries use bounded atomic chunks. Identical refreshes do not rewrite payloads
+or refresh metadata every fifteen minutes. A denied persistence grant can serve
+a fresh result in memory without authorizing an uncharged storage write.
+
+Cached values can fall back for seven days only under their unchanged scoped
+revision. Moderation and edits invalidate their affected scopes, so withdrawn
+content cannot be served through that fallback. Freshness remains fifteen
+minutes, and known quota holds suppress repeated refresh attempts for 15–60
+minutes. Quotas still bound D1 work; this longer fallback avoids losing every
+saved page at the same daily boundary.
 
 ## Limits of the guarantee
 

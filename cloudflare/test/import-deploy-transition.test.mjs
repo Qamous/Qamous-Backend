@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {validateLiveImportState,validateImportApiReady} from '../scripts/import-deploy-transition.mjs';
 import {validateImportPause} from '../scripts/free-plan-guard.mjs';
-const settings=flag=>({bindings:[{name:'PUBLIC_READ_ONLY',text:flag}]});
+const settings=(flag,writes='false')=>({bindings:[{name:'PUBLIC_READ_ONLY',text:flag},{name:'PUBLIC_WRITES_PAUSED',text:writes}]});
 
 test('a paused live importer can transition to a separately validated active release',()=>{
   assert.equal(validateLiveImportState(settings('true'),{schedules:[]}),true);
@@ -15,6 +15,6 @@ test('live schedule mismatch and unknown pause states cannot pass transition ins
     assert.throws(()=>validateLiveImportState(settings(flag),{schedules}));
 });
 test('ingestion cannot resume while the API remains paused or its state is unknown',()=>{
-  for(const value of [settings('true'),settings(''),settings(undefined),{},undefined])
+  for(const value of [settings('true'),settings(''),settings(undefined),settings('false','true'),settings('false',''),{bindings:[{name:'PUBLIC_READ_ONLY',text:'false'}]}, {},undefined])
     assert.throws(()=>validateImportApiReady(value),/explicitly unpaused/);
 });

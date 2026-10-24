@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
-import {publicItems,resolvePublicData} from '../src/public-data.ts';
+import {publicItems,publicWord,resolvePublicData} from '../src/public-data.ts';
 import {feedCandidatesSql,preparedFeedCandidatesSql} from '../src/feed.ts';
 import {storePreparedCards} from '../src/public-card-payloads.ts';
 
@@ -27,7 +27,7 @@ function fixture() {
     INSERT INTO definition_provenance VALUES(1,1,'en',1);
     INSERT INTO definition_examples(definitionId,recordKey,text,language,script) VALUES(1,1,'كتاب جميل','ar','Arabic');`);
   const reads=[];
-  const db={prepare(query){const make=(args=[])=>({bind(...values){return make(values);},async all(){
+  const db={prepare(query){const make=(args=[])=>({bind(...values){return make(values);},async first(){return (await this.all()).results[0]??null;},async all(){
     const before=sql.prepare('SELECT total_changes() AS n').get().n;
     const results=sql.prepare(query).all(...args);reads.push({query,args,rows:results.length});
     return {success:true,results,meta:{changes:sql.prepare('SELECT total_changes() AS n').get().n-before,rows_read:0,rows_written:0}};
@@ -74,6 +74,21 @@ test('prepared cards use one exact lookup with complete credits, forms and examp
     assert.deepEqual(rebuilt[1],expected[1]);
     assert.deepEqual(f.reads[1].args,[1]);
     assert.deepEqual(f.saved(),[2,3,4],'fallback GET never writes to the prepared table');
+  } finally {f.sql.close();}
+});
+
+test('prepared word pages preserve every alias and their exact nested serialization with one query',async()=>{
+  const f=fixture();try {
+    const expected=[];for(const id of [1,2,3])expected.push(await publicWord(f.db,id,false));
+    await f.seed();
+    for(const [index,id] of [1,2,3].entries()) {
+      f.reads.length=0;
+      assert.deepEqual(await publicWord(f.db,id,true),expected[index]);
+      assert.equal(f.reads.length,1,'all prepared senses need one indexed group lookup');
+    }
+    f.sql.exec('UPDATE definitions SET reportCount=5 WHERE id=1');
+    assert.deepEqual(await publicWord(f.db,1,true),await publicWord(f.db,1,false),'combined word/definition threshold remains stricter than cards');
+    await assert.rejects(publicWord(f.db,999,true),{status:404});
   } finally {f.sql.close();}
 });
 

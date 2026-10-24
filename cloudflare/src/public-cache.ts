@@ -1,15 +1,18 @@
 import { DurableObject } from 'cloudflare:workers';
 import { ApiError } from './data.ts';
-import { guardD1, ReadBudgetError } from './read-budget';
+import { guardD1, ReadBudgetError, READ_BUDGET_OBJECT } from './read-budget';
 import { resolvePublicData } from './public-data.ts';
 import { PublicCacheState } from './public-cache-state.ts';
+import { PublicSqliteCacheStore } from './public-cache-sqlite-store.ts';
 import { PublicCacheRevision } from './public-cache-revision.ts';
 import { publicItems } from './public-data.ts';
 import { storePreparedCards } from './public-card-payloads.ts';
 import { PUBLIC_CACHE_PREFIX as PREFIX, PUBLIC_CACHE_REVISION as REVISION, validPublicCacheKey, validatePublicSeed } from './public-cache-keys.ts';
 
 const FRESH_MS=15*60_000;
-const STALE_MS=24*60*60_000;
+// Only the exact current scoped revision is eligible. A quota outage may last
+// through a reset; unchanged, unwithdrawn content remains browsable meanwhile.
+const STALE_MS=7*24*60*60_000;
 interface PublicValue { status: 200 | 404; json: string }
 type PublicReply = { ok: true; payload: PublicValue; state: string } | { ok: false; status: ApiError['status']; message: string; budgetReason?: string; retryAfter?: number };
 
@@ -21,11 +24,8 @@ export class QamousPublicCache extends DurableObject<Env> {
   private coordinator?:PublicCacheRevision;
   constructor(ctx: DurableObjectState,env: Env) {
     super(ctx,env);
-    this.cache=new PublicCacheState({
-      get: <T>(key: string)=>ctx.storage.get<T>(key),
-      put: <T>(key: string,value: T)=>ctx.storage.put(key,value),
-      delete: (key: string)=>ctx.storage.delete(key),
-    });
+    this.cache=new PublicCacheState(new PublicSqliteCacheStore(ctx.storage,(cost,tier)=>
+      env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reservePublicCacheWrites(cost,tier)));
   }
   private revisions() {return this.coordinator??=new PublicCacheRevision(this.ctx.storage);}
   async revision(): Promise<number> {
@@ -50,8 +50,7 @@ export class QamousPublicCache extends DurableObject<Env> {
     }
     const current=await this.env.PUBLIC_CACHE.getByName(REVISION).snapshot([key]);
     if(current.revision!==revision||current.anyPending) throw new Error('Public snapshot generation changed; export a new snapshot');
-    await this.cache.prime(current.versions[0],{status:200,json:JSON.stringify(value)},FRESH_MS,STALE_MS);
-    return {stored:true};
+    return {stored:await this.cache.prime(current.versions[0],{status:200,json:JSON.stringify(value)},FRESH_MS,STALE_MS)};
   }
   async publish(key:string,value:unknown,status:200|404,revision:number):Promise<{stored:boolean}> {
     if(!validPublicCacheKey(key)||(status!==200&&status!==404)) throw new Error('Invalid public mutation payload');
@@ -59,8 +58,7 @@ export class QamousPublicCache extends DurableObject<Env> {
     const current=await this.env.PUBLIC_CACHE.getByName(REVISION).snapshot([key]);
     if(current.pending[0]||current.versions[0]!==revision) return {stored:false};
     const lifetime=status===404?5*60_000:undefined;
-    await this.cache.prime(revision,{status,json:JSON.stringify(value)},lifetime??FRESH_MS,lifetime??STALE_MS);
-    return {stored:true};
+    return {stored:await this.cache.prime(revision,{status,json:JSON.stringify(value)},lifetime??FRESH_MS,lifetime??STALE_MS,'essential')};
   }
   async get(key: string,revision: number): Promise<PublicReply> {
     if(!validPublicCacheKey(key) || !Number.isSafeInteger(revision) || revision<1) return {ok:false,status:400,message:'Invalid public cache request'};

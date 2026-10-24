@@ -67,9 +67,15 @@ app.use('*',async(c,next)=>{
   // A published static snapshot is authoritative during recovery. Stop before
   // every rate-limit, session, database or cache binding; writes cannot race a
   // snapshot whose moderation state is no longer being checked per request.
-  if(c.env.PUBLIC_READ_ONLY==='true') {
+  if(String(c.env.PUBLIC_READ_ONLY)==='true') {
     c.header('Retry-After','60');
     return c.json({statusCode:503,code:'PUBLIC_READ_ONLY',message:'Account features and changes are temporarily unavailable. You can continue browsing the dictionary.'},503);
+  }
+  // Recovery can restore public reads before withdrawing the emergency static
+  // snapshot. Keep every mutation closed until the frontend serves live data.
+  if(String(c.env.PUBLIC_WRITES_PAUSED)==='true' && !['GET','HEAD','OPTIONS'].includes(c.req.method)) {
+    c.header('Retry-After','60');
+    return c.json({statusCode:503,code:'PUBLIC_WRITES_PAUSED',message:'Changes are temporarily paused. Please try again shortly.'},503);
   }
   // Apply the native abuse filter before identity/storage for every method,
   // including authenticated requests and rejected login/write retries. These

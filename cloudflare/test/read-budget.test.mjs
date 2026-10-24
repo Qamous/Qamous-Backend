@@ -143,6 +143,52 @@ test('storage admissions are nonrefundable, retain an essential reserve, and sur
   f.db.close();
 });
 
+test('tier classification preserves legacy/global spend and restores only unused import capacity',()=>{
+  const f=fixture();legacySchema(f);f.db.exec('ALTER TABLE read_budget_days ADD COLUMN operations INTEGER NOT NULL DEFAULT 0');
+  f.db.prepare('INSERT INTO read_budget_days(day,charged,operations) VALUES(?,?,?)').run(day,582524,1512);
+  for(const [tier,queries] of [['public',1311],['import',93],['essential',108]])f.db.prepare('INSERT INTO read_budget_routes(day,route,tier,queries) VALUES(?,?,?,?)').run(day,'/legacy-'+tier,tier,queries);
+  new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  changeState(f,day,state=>{state.operations+=695;state.ledgerRows+=695*8;state.routes['essential:/legacy-essential'].queries+=695;delete state.tierLedgerRows;});
+  const upgraded=new ReadBudgetLedger(f.store,{day,rows:0},()=>{}),before=upgraded.status(start).usage;
+  assert.equal(before.ledgerRows,53944);assert.equal(before.charged,582524);
+  assert.deepEqual(before.tierLedgerRows,{public:41952,import:2976,essential:9016,unknown:0});
+  const admitted=upgraded.reserve(claim(1,'import'),start);assert.equal(admitted.allowed,true);upgraded.settle(admitted.id,0,0,start);
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(restart.status(start).usage.ledgerRows,53952);assert.equal(restart.status(start).usage.tierLedgerRows.import,2984);
+  changeState(f,day,state=>{state.ledgerRows+=3072;state.tierLedgerRows.public+=3072;});
+  assert.equal(restart.reserve(claim(1,'import'),start).reason,'do_storage_budget');
+  assert.equal(restart.reserve(claim(1,'essential'),start).allowed,true,'combined nonessential spend preserves the essential allocation');
+  f.db.close();
+});
+
+test('unclassified compact lifecycle spend remains charged against import and nonessential capacity',()=>{
+  const f=fixture();changeState(f,day,state=>{state.operations=5000;state.ledgerRows=40000;delete state.tierLedgerRows;});
+  const upgraded=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.deepEqual(upgraded.status(start).usage.tierLedgerRows,{public:0,import:0,essential:0,unknown:40000});
+  assert.equal(upgraded.reserve(claim(1,'import'),start).reason,'do_storage_budget');
+  assert.equal(upgraded.reserve(claim(1,'public'),start).allowed,true);
+  f.db.close();
+});
+
+test('public cache storage pool reserves counter writes, protects essential headroom and never resets D1 totals',()=>{
+  const f=fixture(1234);
+  assert.equal(f.ledger.reservePublicCacheWrites(1,'public',start),false,'initial cache usage requires its own verified baseline');
+  const ledger=new ReadBudgetLedger(f.store,{day,rows:0,cacheDay:day,cacheRows:15000},()=>{});
+  assert.equal(ledger.status(start).publicCacheWrites.charged,15001,'bootstrap counter write is included');
+  for(let n=0;n<499;n++)assert.equal(ledger.reservePublicCacheWrites(1,'public',start),true);
+  const before=f.db.prepare('SELECT total_changes() n').get().n;
+  for(let n=0;n<1000;n++)assert.equal(ledger.reservePublicCacheWrites(1,'public',start),false);
+  assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before,'denials never write a counter');
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0,cacheDay:day,cacheRows:0},()=>{});
+  assert.equal(restart.status(start).publicCacheWrites.charged,15999,'bootstrap cannot reset earlier allocations');
+  assert.equal(restart.reservePublicCacheWrites(1,'essential',start),true);
+  assert.equal(restart.status(start).usage.charged,1234);assert.equal(restart.status(start).usage.ledgerRows,0);
+  for(const [cost,tier] of [[0,'public'],[-1,'public'],[513,'public'],[1,'import'],[NaN,'essential']])assert.equal(restart.reservePublicCacheWrites(cost,tier,start),false);
+  assert.equal(restart.reservePublicCacheWrites(1,'public',start+86400000),true);
+  assert.equal(restart.status(start+86400000).publicCacheWrites.charged,2,'new-day admission writes only its precharged counter');
+  f.db.close();
+});
+
 test('legacy admitted queries consume the storage allowance during migration',()=>{
   const f=fixture();
   legacySchema(f);
@@ -336,12 +382,12 @@ test('987 concurrent callers cannot race past persisted global reservations',{ti
 
 test('coordinator failure submits no SQL; unknown D1 result never refunds the reservation',async()=>{
   const raw=fakeD1(),broken={READ_BUDGET:{getByName:()=>({reserve:async()=>{throw Error('unavailable');}})}};
-  await assert.rejects(()=>guardD1(raw.db,broken,{route:'/word',tier:'public'}).prepare('SELECT answer FROM sample').all(),ReadBudgetError);assert.equal(raw.calls,0);
+  await assert.rejects(()=>guardD1(raw.db,broken,{route:'/word',tier:'public'}).prepare('SELECT answer FROM sample').all(),error=>error instanceof ReadBudgetError&&error.sqlSubmitted===false);assert.equal(raw.calls,0);
   const f=fixture(),failed=fakeD1({fail:true});
   await assert.rejects(()=>guardD1(failed.db,environment(f.ledger),{route:'/word',tier:'public'}).prepare('SELECT answer FROM sample').all());
   assert.equal(f.ledger.status(start).usage.charged,50_000);
   const noMeta=fakeD1({missing:true});
-  await assert.rejects(()=>guardD1(noMeta.db,environment(f.ledger),{route:'/word',tier:'public'}).prepare('SELECT answer FROM sample').all(),ReadBudgetError);
+  await assert.rejects(()=>guardD1(noMeta.db,environment(f.ledger),{route:'/word',tier:'public'}).prepare('SELECT answer FROM sample').all(),error=>error instanceof ReadBudgetError&&error.sqlSubmitted===true);
   assert.equal(f.ledger.status(start).usage.charged,100_000);f.db.close();
 });
 

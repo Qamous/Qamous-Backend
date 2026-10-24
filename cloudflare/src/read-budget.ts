@@ -12,7 +12,8 @@ export class ReadBudgetError extends Error {
   readonly code='D1_READ_BUDGET';
   readonly reason:string;
   readonly retryAfter:number;
-  constructor(reason:string,retryAfter=60) {super('The dictionary is temporarily busy. Please try again shortly.');this.name='ReadBudgetError';this.reason=reason;this.retryAfter=retryAfter;}
+  readonly sqlSubmitted:boolean;
+  constructor(reason:string,retryAfter=60,sqlSubmitted=false) {super('The dictionary is temporarily busy. Please try again shortly.');this.name='ReadBudgetError';this.reason=reason;this.retryAfter=retryAfter;this.sqlSubmitted=sqlSubmitted;}
 }
 const fail=(reason:string):never=>{throw new ReadBudgetError(reason);};
 
@@ -50,9 +51,10 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
     const data=statements.map(statement=>statementData.get(statement)||fail('foreign_statement'));
     const rows=data.reduce((sum,statement)=>sum+statement.rows,0);
     if(rows>READ_BUDGET_POLICY.maxReservationRows)return fail('batch_cost_too_large');
-    const stub=coordinator(),id=crypto.randomUUID();
+    let stub:ReadBudgetStub;const id=crypto.randomUUID();
     let admission:Admission;
     try {
+      stub=coordinator();
       admission=await stub.reserve({id,rows,route,tier:context.tier});
       // Short bounded contention retries are safe only after a definitive
       // denial (no reservation exists). Never retry a lost acknowledgement.
@@ -75,6 +77,9 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
       // A pre-write scope/claim refusal is known to have submitted no SQL.
       // Once submitted, a missing result retains its entire reservation.
       try {await stub.settle(id,submitted?null:0);}catch { /* The persisted charge remains. */ }
+      // Admission failures prove SQL was not submitted. Never let a downstream
+      // error reuse that proof after the raw D1 execution has started.
+      if(submitted&&error instanceof ReadBudgetError)throw new ReadBudgetError(error.reason,error.retryAfter,true);
       throw error;
     }
     const valid=results.length===statements.length&&results.every(result=>result.success===true&&Number.isSafeInteger(result.meta?.rows_read)&&result.meta.rows_read>=0&&Number.isSafeInteger(result.meta?.rows_written)&&result.meta.rows_written>=0);
@@ -86,7 +91,7 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
       // accounting acknowledgement was lost. The full reservation stays charged.
       console.error(JSON.stringify({event:'d1_read_settlement_unavailable',route,tier:context.tier,reserved:rows,actual}));
     }
-    if(actual===null)throw new ReadBudgetError('missing_cost_metadata');
+    if(actual===null)throw new ReadBudgetError('missing_cost_metadata',60,true);
     return results;
   };
   const prepare=(owner:D1Database|D1DatabaseSession,sql:string):D1PreparedStatement=>{

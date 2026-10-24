@@ -126,7 +126,8 @@ export default {
     // Authenticated inspection and the narrowly checked pre-D1 baseline repair
     // are available during pause; neither endpoint submits an import packet.
     if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET')&&!(url.pathname==='/read-budget'&&request.method==='GET')&&!(url.pathname==='/recover-baseline'&&request.method==='POST')&&!(url.pathname==='/recovery-export-budget'&&request.method==='POST')
-      &&!(url.pathname==='/prepared-cards/seed'&&request.method==='POST')&&!(url.pathname==='/prepared-cards/status'&&request.method==='GET')&&!(url.pathname==='/prepared-cards/maintenance-budget'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
+      &&!(url.pathname==='/prepared-cards/seed'&&request.method==='POST')&&!(url.pathname==='/prepared-cards/status'&&request.method==='GET')&&!(url.pathname==='/prepared-cards/maintenance-budget'&&request.method==='POST')
+      &&!(url.pathname==='/public-cache/revision'&&request.method==='GET')&&!(url.pathname==='/public-cache/seed'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
       {status:503,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Retry-After':'60'}});
     try {
       if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
@@ -161,10 +162,9 @@ export default {
         const {id}=await boundedJson(request,1024);
         return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserve({id,rows:250000,route:'maintenance:recovery-export',tier:'essential'}));
       }
-      const stub=coordinator(env);
       if(url.pathname==='/recover-baseline'&&request.method==='POST'){
         if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Baseline recovery requires ingestion to remain explicitly paused'},409);
-        return response(await stub.recoverBaseline(await boundedJson(request,2048)));
+        return response(await coordinator(env).recoverBaseline(await boundedJson(request,2048)));
       }
       if(url.pathname==='/read-budget/reconcile'&&request.method==='POST') {
         return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile(await boundedJson(request,1024)));
@@ -185,6 +185,7 @@ export default {
         validatePublicSeed(key,value);
         return response(await env.PUBLIC_CACHE.getByName(PUBLIC_CACHE_PREFIX+key).seed(key,value,revision));
       }
+      const stub=coordinator(env);
       if(url.pathname==='/status'&&request.method==='GET')return response(await stub.status());
       if(url.pathname==='/tick'&&request.method==='POST')return response(await stub.tick('manual'));
       if(url.pathname==='/arm'&&request.method==='POST'){
