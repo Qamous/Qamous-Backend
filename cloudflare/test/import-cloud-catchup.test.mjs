@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {IMPORT_ACCOUNT,IMPORT_MANIFEST,CLOUD_PACKET_RESERVE,IMPORT_LEDGER_POLICY_VERSION,importPolicyAt,importQuota,importLedgerCapacity,quotaRetryAt,recoverCloudFlight} from '../src/import-cloud-policy.mjs';
+import {IMPORT_ACCOUNT,IMPORT_MANIFEST,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,IMPORT_LEDGER_POLICY_VERSION,importPolicyAt,importQuota,importLedgerCapacity,quotaRetryAt,recoverCloudFlight} from '../src/import-cloud-policy.mjs';
 import {runCloudImport,recoverBaselineHalt,BASELINE_HALT_REASON} from '../src/import-cloud.mjs';
 import {READ_BUDGET_POLICY} from '../src/read-budget-ledger.ts';
 
@@ -34,6 +34,24 @@ test('legacy generic budget holds receive exactly one fresh policy reassessment 
   assert.equal(quotaRetryAt(held,at('14:00:00')),at('14:00:00').toISOString());
   assert.equal(quotaRetryAt({...held,ledgerPolicyVersion:IMPORT_LEDGER_POLICY_VERSION},at('14:00:00')),held.nextAttemptAt);
   for(const change of [{inFlight:{index:0}},{halted:true},{status:'halted'},{reason:'Reaction, points or managed-account integrity failed'}])assert.equal(quotaRetryAt({...held,...change},at('14:00:00')),held.nextAttemptAt);
+});
+
+test('only an expired, identified legacy flight can wake its unchanged recovery path',()=>{
+  const now=at('14:00:00'),held={...state(1000),...waiting,cursor:0,reason:'The dictionary is temporarily busy. Please try again shortly.',inFlight:{index:0,startedAt:'2026-10-21T13:40:00Z',reservedWrites:5000}};
+  const original=structuredClone(held);
+  assert.equal(quotaRetryAt(held,now),now.toISOString());assert.deepEqual(held,original,'policy inspection never clears or charges the flight');
+  for(const change of [
+    {inFlight:{...held.inFlight,startedAt:new Date(now.getTime()-IMPORT_LIMITS.leaseMs+1).toISOString()}},
+    {inFlight:{...held.inFlight,startedAt:'invalid'}},
+    {inFlight:{...held.inFlight,startedAt:2026}},
+    {inFlight:{...held.inFlight,index:1}},
+    {lease:{expiresAt:'2026-10-21T14:01:00Z'}},
+    {lease:{expiresAt:'invalid'}},
+    {ledgerPolicyVersion:IMPORT_LEDGER_POLICY_VERSION},
+    {status:'needs_access'},
+    {reason:'Shared Free quota reserve reached'},
+    {halted:true},
+  ])assert.equal(quotaRetryAt({...held,...change},now),held.nextAttemptAt);
 });
 
 test('shared usage, maintenance reserves and the full 10k allowance constrain late catch-up',()=>{
@@ -95,6 +113,31 @@ test('late window never submits a packet which cannot fit its unchanged reservat
 test('restart recovery still charges an uncertain packet only once on its original day',()=>{
   const s={...state(65241),cursor:0,inFlight:{index:0,startedAt:'2026-10-21T22:01:00Z',reservedWrites:10000}};
   assert.equal(recoverCloudFlight(s,new Date('2026-10-22T00:15:00Z')),true);assert.equal(s.days['2026-10-21'].rowsWritten,75241);assert.equal(recoverCloudFlight(s),false);
+});
+
+test('stale legacy quota flight charges the full 10k once before guarded immutable replay',async()=>{
+  const f=await fixture('14:00:00',1000),key=f.key+'checkpoint.json';
+  const checkpoint=JSON.parse(await (await f.objects.get(key)).text());
+  Object.assign(checkpoint,{reason:'The dictionary is temporarily busy. Please try again shortly.',inFlight:{index:0,startedAt:'2026-10-21T04:24:07Z',reservedWrites:5000}});await f.objects.put(key,JSON.stringify(checkpoint));
+  let billing=0,observations=0;f.deps.billing=async()=>{billing++;return {accountId:IMPORT_ACCOUNT,observedAt:at('14:00:00').toISOString()};};f.deps.usage=async()=>{observations++;return usage(1000);};
+  const result=await runCloudImport(f.env,'scheduled',f.deps);
+  assert.equal(result.state,'complete');assert.equal(result.cursor,1);assert.equal(result.days['2026-10-21'].rowsWritten,11300);assert.equal(result.recoveredPackets,1);assert.equal(result.verifiedScheduledBatch.integrityPassed,true);assert.equal(billing,1);assert.equal(observations,1);assert.equal(f.batches,1);
+  const saved=JSON.parse(await (await f.objects.get(key)).text());assert.equal(saved.inFlight,undefined);assert.equal(saved.lastRecovery.additionalWriteCharge,10000);
+  await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,1);assert.equal(JSON.parse(await (await f.objects.get(key)).text()).days['2026-10-21'].rowsWritten,11300);
+});
+
+test('stale legacy recovery still waits if its full conservative charge leaves less than 10k',async()=>{
+  const f=await fixture('14:00:00',60001),key=f.key+'checkpoint.json';
+  const checkpoint=JSON.parse(await (await f.objects.get(key)).text());Object.assign(checkpoint,{reason:'The dictionary is temporarily busy. Please try again shortly.',inFlight:{index:0,startedAt:'2026-10-21T04:24:07Z'}});await f.objects.put(key,JSON.stringify(checkpoint));
+  const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,0);assert.equal(result.state,'waiting_for_free_quota');assert.equal(result.cursor,0);assert.equal(result.days['2026-10-21'].rowsWritten,70001);assert.equal(result.recoveredPackets,1);assert.equal(result.ledgerPolicyVersion,IMPORT_LEDGER_POLICY_VERSION);
+  f.time='14:01:00';const retry=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(retry.days['2026-10-21'].rowsWritten,70001);assert.equal(retry.recoveredPackets,1);assert.equal(f.batches,0);
+});
+
+test('a recent legacy flight remains untouched without billing, SQL or an early recovery charge',async()=>{
+  const f=await fixture('14:00:00',1000),key=f.key+'checkpoint.json';
+  const checkpoint=JSON.parse(await (await f.objects.get(key)).text());Object.assign(checkpoint,{reason:'The dictionary is temporarily busy. Please try again shortly.',inFlight:{index:0,startedAt:'2026-10-21T13:59:00Z',reservedWrites:10000}});await f.objects.put(key,JSON.stringify(checkpoint));
+  f.deps.billing=()=>{throw Error('A recent unknown flight cannot trigger billing/replay');};
+  const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(result.cursor,0);assert.equal(result.recoveredPackets,0);assert.equal(f.batches,0);assert.equal(result.days['2026-10-21'].rowsWritten,1000);assert.deepEqual(JSON.parse(await (await f.objects.get(key)).text()).inFlight,checkpoint.inFlight);
 });
 
 test('global read guard pauses import before SQL even when analytics report low usage',async()=>{

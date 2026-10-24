@@ -24,14 +24,23 @@ export function nextQuotaOpportunity(now=new Date()) {
   return nextImportDay(now);
 }
 // Upgrade old quota checkpoints to the new same-day window. Never shorten
-// network/auth retries, integrity holds, final-audit waits or uncertain writes.
+// network/auth retries, integrity holds or final-audit waits. A stale legacy
+// flight may only wake the existing conservative recovery path, never clear it.
 export function quotaRetryAt(state,now=new Date()) {
   const saved=state.nextAttemptAt,last=Date.parse(state.lastAttemptAt);
-  if(state.status!=='waiting_for_free_quota'||state.halted||state.inFlight||!Number.isFinite(Date.parse(saved))||!Number.isFinite(last)||last>now.getTime())return saved;
+  if(state.status!=='waiting_for_free_quota'||state.halted||!Number.isFinite(Date.parse(saved))||!Number.isFinite(last)||last>now.getTime())return saved;
   // Older releases stored only this display message, not a reason code. Wake
   // once after the accounting-policy upgrade to recheck REAL capacity before
   // any SQL. No counters, uncertain packets or integrity halts are reset.
-  if(state.reason==='The dictionary is temporarily busy. Please try again shortly.'&&state.ledgerPolicyVersion!==IMPORT_LEDGER_POLICY_VERSION)return now.toISOString();
+  if(state.reason==='The dictionary is temporarily busy. Please try again shortly.'&&state.ledgerPolicyVersion!==IMPORT_LEDGER_POLICY_VERSION) {
+    if(state.lease&&(!Number.isFinite(Date.parse(state.lease.expiresAt))||Date.parse(state.lease.expiresAt)>now.getTime()))return saved;
+    if(state.inFlight) {
+      const flight=state.inFlight,started=Date.parse(flight.startedAt);
+      if(flight.index!==state.cursor||typeof flight.startedAt!=='string'||!/^\d{4}-\d{2}-\d{2}T/.test(flight.startedAt)||!Number.isFinite(started)||started+IMPORT_LIMITS.leaseMs>now.getTime()||!state.days?.[flight.startedAt.slice(0,10)])return saved;
+    }
+    return now.toISOString();
+  }
+  if(state.inFlight)return saved;
   if(state.reason!=='Shared Free quota reserve reached')return saved;
   const candidate=nextQuotaOpportunity(new Date(last));
   return Date.parse(candidate)<Date.parse(saved)?candidate:saved;
@@ -79,8 +88,11 @@ export function recoverCloudFlight(state,now = new Date()) {
   if(flight.index!==state.cursor||!/^\d{4}-\d{2}-\d{2}T/.test(flight.startedAt)||!state.days[flight.startedAt.slice(0,10)])throw Error('Unrecognized interrupted cloud packet');
   // A failed response may hide a committed transaction. Charge once on its
   // original UTC day; replay only INSERT OR IGNORE, never points/vote mutations.
-  const reserve=flight.reservedWrites??IMPORT_LIMITS.packetReserve;
-  if(!Number.isSafeInteger(reserve)||reserve<IMPORT_LIMITS.packetReserve||reserve>CLOUD_PACKET_RESERVE)throw Error('Unrecognized interrupted write reservation');
+  const savedReserve=flight.reservedWrites??IMPORT_LIMITS.packetReserve;
+  if(!Number.isSafeInteger(savedReserve)||savedReserve<IMPORT_LIMITS.packetReserve||savedReserve>CLOUD_PACKET_RESERVE)throw Error('Unrecognized interrupted write reservation');
+  // Old checkpoints may contain the original 5k margin. An unknown response
+  // receives today's full 10k bound before any replay or new quota decision.
+  const reserve=Math.max(savedReserve,CLOUD_PACKET_RESERVE);
   // A successful D1 batch is durably charged before identity/audit work. Its
   // receipt and day totals are persisted together; retry must not charge it a
   // second time merely because later verification lost its response.
