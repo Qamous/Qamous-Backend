@@ -2,8 +2,14 @@ import { ApiError } from './data.ts';
 
 export const PUBLIC_CACHE_PREFIX='qamous-public:v1:';
 export const PUBLIC_CACHE_REVISION=PUBLIC_CACHE_PREFIX+'revision';
+export function publicItemIds(key:string):number[]|null {
+  if(!/^items:[1-9]\d*(?:,[1-9]\d*)*$/.test(key))return null;
+  const ids=key.slice(6).split(',').map(Number);
+  return ids.length<=50&&ids.every((id,index)=>Number.isSafeInteger(id)&&(index===0||id>ids[index-1]))?ids:null;
+}
 export function validPublicCacheKey(key: string): boolean {
   return key.length<=2200 && (['countries','posts','sources','seo-index'].includes(key) || /^feed:[01]$/.test(key)
+    || publicItemIds(key)!==null
     || /^word:[1-9]\d{0,15}$/.test(key) || /^cards:\d{1,14}$/.test(key) || /^related:[A-Z]{2}:(ar|franco)$/.test(key)
     || /^seo-shard:\d{1,14}$/.test(key) || /^seo-browse:(ar|en):(?:[1-9]\d{0,15})?$/.test(key)
     || /^seo-dialect:[^:]{1,1200}$/.test(key) || /^explore:/.test(key));
@@ -26,7 +32,7 @@ export function validatePublicSeed(key: string,value: unknown): void {
     }
   };
   visit(value);
-  if((key==='countries'||key.startsWith('word:')||key.startsWith('feed:')||key.startsWith('cards:')||key.startsWith('seo-shard:'))&&!Array.isArray(value)) {
+  if((key==='countries'||key.startsWith('word:')||key.startsWith('feed:')||key.startsWith('cards:')||key.startsWith('items:')||key.startsWith('seo-shard:'))&&!Array.isArray(value)) {
     throw new ApiError(400,'Invalid public cache payload shape');
   }
   if(new TextEncoder().encode(JSON.stringify(value)).byteLength>16_000_000) throw new ApiError(413,'Public cache payload is too large');

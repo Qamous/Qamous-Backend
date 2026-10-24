@@ -15,6 +15,14 @@ const sqlite=new DatabaseSync(':memory:');
 sqlite.exec('PRAGMA foreign_keys=OFF;');
 sqlite.exec(await readFile(resolve(dictionaryFile),'utf8'));
 sqlite.exec(await readFile(resolve(supportFile),'utf8'));
+// A schema-bearing export includes reaction/accounting triggers referencing
+// users. They are irrelevant to this isolated read-only projector and would
+// make SQLite reject the account-table replacement while validating ALTER.
+// Discard them only in memory, after loading the complete exported data.
+sqlite.exec('PRAGMA foreign_keys=OFF;');
+for(const {name} of sqlite.prepare("SELECT name FROM sqlite_schema WHERE type='trigger'").all()) {
+  sqlite.exec('DROP TRIGGER "'+name.replaceAll('"','""')+'"');
+}
 // Only the public importer display name is needed for attribution. Remove all
 // other account fields before invoking any public projection.
 sqlite.exec('CREATE TABLE public_importer_names AS SELECT id,username FROM users; DROP TABLE users; ALTER TABLE public_importer_names RENAME TO users;');

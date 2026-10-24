@@ -20,6 +20,12 @@ export const feedCandidatesSql = `WITH requested(isArabic) AS (VALUES (?)) SELEC
  FROM dictionary_cards c JOIN public_definitions d ON d.id=c.definitionId
  JOIN words w ON w.id=d.wordId CROSS JOIN requested r WHERE c.isArabic=r.isArabic AND d.reportCount<=5 AND w.reportCount<=5`;
 
+// Maintained alongside dictionary_cards by migration triggers. Refreshing vote
+// weights reads one covering index in the requested language, without joining
+// the definitions and words tables or rebuilding public cards.
+export const preparedFeedCandidatesSql = `SELECT definitionId,likeCount,dislikeCount
+ FROM public_feed_candidates WHERE isArabic=? ORDER BY definitionId`;
+
 export function feedScript(value: string | undefined): number {
   if (value !== 'ar' && value !== 'franco') throw new ApiError(400, 'Invalid feed script');
   return value === 'ar' ? 1 : 0;

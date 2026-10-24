@@ -24,9 +24,6 @@ export function licenseLink(license: string, evidenceUrl: string): string {
   return evidenceUrl;
 }
 const publicSource = (row: Row) => ({...row,licenseUrl:licenseLink(String(row.license),String(row.licenseUrl))});
-async function orderedReads<T>(queries:(()=>Promise<T>)[]):Promise<T[]> {
-  const results:T[]=[];for(const query of queries) results.push(await query());return results;
-}
 export function isImportPreview(url: string, env: object): boolean {
   const flag = (env as { LOCAL_IMPORT_PREVIEW?: string | boolean }).LOCAL_IMPORT_PREVIEW;
   return (flag === 'true' || flag === true)
@@ -39,28 +36,28 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
   const credits = new Map<number, SourceCredit[]>(), examples = new Map<number, Row[]>(), pronunciations = new Map<number, Row[]>(),forms=new Map<number,Row[]>(), community=new Map<number,Row>(),exampleChanges=new Map<number,Set<string>>();
   for (let i = 0; i < ids.length; i += 90) {
     const part = ids.slice(i, i + 90), placeholders = part.map(() => '?').join(',');
-    // One public-cache refresh holds only one global read reservation at a
-    // time. Concurrent word misses must not multiply four parallel leases.
-    const [sourceRows, exampleRows, pronunciationRows, formRows] = await orderedReads([
-      ()=>db.prepare('SELECT p.definitionId,t.text AS changes,s.id AS sourceId,s.name AS sourceName,' +
+    // A single guarded D1 batch holds one reservation for these four read-only
+    // statements. It keeps complete cards with one accounting lifecycle.
+    const [sourceRows, exampleRows, pronunciationRows, formRows] = await db.batch<Row>([
+      db.prepare('SELECT p.definitionId,t.text AS changes,s.id AS sourceId,s.name AS sourceName,' +
         's.license,s.licenseUrl,s.rightsStatus,s.attributionRequired,s.credit,s.notice,' +
         'r.sourceUrl,r.sourceEntryId,r.dialect,r.transliteration,r.originalMetadata,r.recordKey,r.arabic,r.franco,r.displayFranco,u.username ' +
         'FROM definition_provenance p JOIN import_change_templates t ON t.id=p.changes JOIN import_records r ON r.recordKey=p.recordKey ' +
         'JOIN import_sources s ON s.id=r.sourceId JOIN users u ON u.id=r.importerUserId ' +
         'WHERE p.definitionId IN (' + placeholders + ") AND r.status IN ('accepted','duplicate') " +
-        'ORDER BY s.id,r.recordKey').bind(...part).all<Row>(),
-      ()=>db.prepare('SELECT e.id,e.recordKey,e.definitionId,e.text,e.language,e.script,e.kind,e.groupKeys,e.alignment,r.sourceId,r.sourceEntryId FROM definition_examples e JOIN import_records r ON r.recordKey=e.recordKey ' +
-        "WHERE e.language IN ('ar','en','ar-Latn') AND e.definitionId IN (" + placeholders + ') ORDER BY e.definitionId,e.language,e.text').bind(...part).all<Row>(),
-      ()=>db.prepare('SELECT DISTINCT p.definitionId,n.scheme,n.value,n.language,n.kind,r.sourceId,s.name AS sourceName,' +
+        'ORDER BY s.id,r.recordKey').bind(...part),
+      db.prepare('SELECT e.id,e.recordKey,e.definitionId,e.text,e.language,e.script,e.kind,e.groupKeys,e.alignment,r.sourceId,r.sourceEntryId FROM definition_examples e JOIN import_records r ON r.recordKey=e.recordKey ' +
+        "WHERE e.language IN ('ar','en','ar-Latn') AND e.definitionId IN (" + placeholders + ') ORDER BY e.definitionId,e.language,e.text').bind(...part),
+      db.prepare('SELECT DISTINCT p.definitionId,n.scheme,n.value,n.language,n.kind,r.sourceId,s.name AS sourceName,' +
         'r.sourceUrl,r.sourceEntryId,r.dialect FROM definition_provenance p ' +
         'JOIN import_records r ON r.recordKey=p.recordKey JOIN import_sources s ON s.id=r.sourceId ' +
         'JOIN import_pronunciations n ON n.recordKey=r.recordKey WHERE p.definitionId IN (' + placeholders +
-        ") AND r.status IN ('accepted','duplicate') ORDER BY p.definitionId,r.sourceId,r.sourceEntryId,n.scheme,n.value").bind(...part).all<Row>(),
-      ()=>db.prepare('SELECT d.id AS definitionId,d.example,d.arabicExample,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.exampleAlignment,s.dialect,s.arabicVariants,s.francoVariants,'+
+        ") AND r.status IN ('accepted','duplicate') ORDER BY p.definitionId,r.sourceId,r.sourceEntryId,n.scheme,n.value").bind(...part),
+      db.prepare('SELECT d.id AS definitionId,d.example,d.arabicExample,w.arabicWord AS originalArabic,w.francoArabicWord,w.canonicalArabic,s.arabicForm,s.francoForm,s.transliteration,s.ipa,s.englishExample,s.exampleAlignment,s.dialect,s.arabicVariants,s.francoVariants,'+
         '(SELECT json_group_array(c.isArabic) FROM dictionary_cards c WHERE c.canonicalArabic=w.canonicalArabic) AS definitionLanguages,'+
         '(SELECT MIN(id) FROM words ww WHERE ww.canonicalArabic=w.canonicalArabic AND ww.reportCount<=5) AS canonicalWordId,'+
         '(SELECT MIN(id) FROM definitions dd WHERE dd.submissionId=s.id) AS communityMeaningId '+
-        'FROM definitions d JOIN words w ON w.id=d.wordId LEFT JOIN contribution_submissions s ON s.id=d.submissionId WHERE d.id IN ('+placeholders+')').bind(...part).all<Row>(),
+        'FROM definitions d JOIN words w ON w.id=d.wordId LEFT JOIN contribution_submissions s ON s.id=d.submissionId WHERE d.id IN ('+placeholders+')').bind(...part),
     ]);
     for (const r of sourceRows.results) {
       const id = Number(r.definitionId), metadata = parse<Row>(r.originalMetadata, {});

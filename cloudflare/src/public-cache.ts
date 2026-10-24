@@ -4,6 +4,8 @@ import { guardD1, ReadBudgetError } from './read-budget';
 import { resolvePublicData } from './public-data.ts';
 import { PublicCacheState } from './public-cache-state.ts';
 import { PublicCacheRevision } from './public-cache-revision.ts';
+import { publicItems } from './public-data.ts';
+import { storePreparedCards } from './public-card-payloads.ts';
 import { PUBLIC_CACHE_PREFIX as PREFIX, PUBLIC_CACHE_REVISION as REVISION, validPublicCacheKey, validatePublicSeed } from './public-cache-keys.ts';
 
 const FRESH_MS=15*60_000;
@@ -38,7 +40,8 @@ export class QamousPublicCache extends DurableObject<Env> {
   async beginMutation(id:string):Promise<void> {this.revisions().begin(id);}
   async finishMutation(id:string):Promise<void> {this.revisions().finish(id);}
   async beginScoped(id:string,selectors:string[]):Promise<void> {this.revisions().beginScoped(id,selectors);}
-  async claimScoped(id:string,selectors:string[]):Promise<boolean> {return this.revisions().claimScoped(id,selectors);}
+  async claimScoped(id:string,selectors:string[],existingOnly=false):Promise<boolean> {return this.revisions().claimScoped(id,selectors,Date.now(),existingOnly);}
+  async renewScoped(id:string):Promise<boolean> {return this.revisions().renewScoped(id);}
   async finishScoped(id:string):Promise<void> {this.revisions().finishScoped(id);}
   async seed(key: string,value: unknown,revision: number): Promise<{stored:boolean}> {
     validatePublicSeed(key,value);
@@ -64,7 +67,7 @@ export class QamousPublicCache extends DurableObject<Env> {
     try {
       const result=await this.cache.get<PublicValue>(revision,FRESH_MS,STALE_MS,async()=>{
         const db=guardD1(this.env.DB,this.env,{route:'cache:'+key.split(':')[0],tier:'public'});
-        try {return {status:200,json:JSON.stringify(await resolvePublicData(db,key))};}
+        try {return {status:200,json:JSON.stringify(await resolvePublicData(db,key,this.env.PUBLIC_CARD_PAYLOADS==='true'))};}
         catch(error) {if(error instanceof ApiError && error.status===404) return {status:404,json:JSON.stringify(error.message)};throw error;}
       },value=>value.status===404?{freshMs:5*60_000,staleMs:5*60_000}:{freshMs:FRESH_MS,staleMs:STALE_MS});
       if(result.state!=='hit') console.log(JSON.stringify({event:'public_cache',resource:key.split(':')[0],state:result.state}));
@@ -131,7 +134,39 @@ export async function refreshPublicMutation(env:Env,selectors:string[]):Promise<
   return entries;
 }
 
-export function publicMutationBarrier(env:Pick<Env,'PUBLIC_CACHE'>,resolveScope:()=>Promise<string[]>,refresh?:(selectors:string[])=>Promise<MutationPublication[]>) {
+export class PublicPreparationUncertainError extends Error {}
+export async function preparePublicMutation(env:Env,selectors:string[],renew:()=>Promise<boolean>):Promise<void> {
+  if(env.PUBLIC_CARD_PAYLOADS!=='true')return;
+  let uncertain=false;
+  const requireLease=async()=>{if(!await renew())throw new Error('Public preparation lease expired');};
+  const db=guardD1(env.DB,env,{route:'cache:prepare-cards',tier:'essential',beforeWrite:requireLease,unknownWrite:()=>{uncertain=true;}});
+  const ids=new Set<number>();
+  try {
+  for(const key of selectors.filter(key=>/^word:\d+$/.test(key)).slice(0,4)) {
+    await requireLease();
+    const rows=await db.prepare(`SELECT d.id FROM public_definitions d JOIN words w ON w.id=d.wordId
+      WHERE w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?)
+      AND d.reportCount<=5 AND w.reportCount<=5 ORDER BY d.id LIMIT 51`).bind(Number(key.slice(5))).all<{id:number}>();
+    // Large dictionary maintenance uses the bounded offline publisher instead
+    // of making an interactive writer prepare an unbounded collection.
+    if(rows.results.length>50)continue;
+    rows.results.forEach(row=>ids.add(Number(row.id)));
+  }
+  const values=[...ids];
+  for(let offset=0;offset<values.length;offset+=50) {
+    await requireLease();
+    const cards=await publicItems(db,values.slice(offset,offset+50),false);
+    await storePreparedCards(db,cards);
+  }
+  } catch(error) {
+    // A lost INSERT acknowledgement may still be executing in D1. Keep the
+    // word barrier until its lease expires, beyond D1's statement timeout.
+    if(uncertain)throw new PublicPreparationUncertainError('Prepared public card write outcome is unknown');
+    throw error;
+  }
+}
+
+export function publicMutationBarrier(env:Pick<Env,'PUBLIC_CACHE'>,resolveScope:()=>Promise<string[]>,refresh?:(selectors:string[])=>Promise<MutationPublication[]>,prepare?:(selectors:string[],renew:()=>Promise<boolean>)=>Promise<void>) {
   const id=crypto.randomUUID();let started=false,unknown=false;
   const selectors=new Set<string>();
   const coordinator=env.PUBLIC_CACHE.getByName(REVISION);
@@ -164,7 +199,17 @@ export function publicMutationBarrier(env:Pick<Env,'PUBLIC_CACHE'>,resolveScope:
         // Resolve again to include IDs allocated by INSERT and both the old and
         // new membership of renamed words. The original scopes remain held.
         const size=selectors.size,keys=await scope();
-        if(selectors.size!==size) await coordinator.beginScoped(id,keys);
+        if(selectors.size!==size&&!await coordinator.claimScoped(id,keys,true))throw new Error('Public mutation lease expired or its expanded scope is busy');
+        // Derived D1 rows must be prepared while the content ticket is held.
+        // Releasing first would allow a newer edit to be overwritten by an
+        // older preparation result. Failed preparation leaves rows dirty.
+        if(prepare) {
+          try {await prepare(keys,()=>coordinator.renewScoped(id));}
+          catch(error) {
+            console.log(JSON.stringify({event:'public_card_preparation_deferred'}));
+            if(error instanceof PublicPreparationUncertainError)return;
+          }
+        }
         await coordinator.finishScoped(id);
         if(refresh) {
           // Capture versions BEFORE the fresh read. A simultaneous edit must

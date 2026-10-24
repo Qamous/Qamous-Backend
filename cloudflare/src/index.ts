@@ -14,9 +14,9 @@ import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
 import { verifyRagTurnstile } from './turnstile';
 import { seoIndex, seoShard, seoBucket, seoBrowse, seoRelated, seoDialect } from './seo';
-import { publicData, publicDataMany, publicMutationBarrier, refreshPublicMutation } from './public-cache';
+import { publicData, publicDataMany, publicMutationBarrier, refreshPublicMutation, preparePublicMutation } from './public-cache';
 import { resolvePublicMutationScope } from './public-mutation-scope';
-import { exploreCacheKey, relatedKey, personalReactions, publicItemBuckets, publicItemsFromBuckets } from './public-data';
+import { exploreCacheKey, relatedKey, personalReactions, publicItemsKey, publicItemsFromBuckets } from './public-data';
 export { QamousRuntime } from './runtime';
 export { QamousPublicCache } from './public-cache';
 export { QamousReadBudget } from './read-budget-object';
@@ -98,7 +98,8 @@ app.use('*',async(c,next)=>{
     mutationBody??=['POST','PATCH','PUT'].includes(c.req.method)?await body(c):{};
     return resolvePublicMutationScope(scopeDb!,c.req.method,c.req.path,{...mutationBody,...c.get('publicMutationData')},c.get('user')?.id||null);
   };
-  const barrier=changesPublic?publicMutationBarrier(original,resolveScope,keys=>refreshPublicMutation(original,keys)):undefined;
+  const barrier=changesPublic?publicMutationBarrier(original,resolveScope,keys=>refreshPublicMutation(original,keys),
+    (keys,renew)=>preparePublicMutation(original,keys,renew)):undefined;
   c.env={...original,DB:guardD1(original.DB,original,{route:c.req.path,tier:essential?'essential':'public',beforeWrite:barrier?.beforeWrite,unknownWrite:barrier?.unknownWrite})};
   try {await next();} finally {await barrier?.finish();}
 });
@@ -288,7 +289,7 @@ app.delete('/countries/:code',async c=>{admin(c);await c.env.DB.prepare('DELETE 
 app.get('/word/explore',async c=>{
   const params=new URL(c.req.url).searchParams;
   const data=params.has('ids')
-    ?publicItemsFromBuckets(params,await publicDataMany<Row[]>(c.env,publicItemBuckets(params)))
+    ?publicItemsFromBuckets(params,[await publicData<Row[]>(c.env,publicItemsKey(params))])
     :await publicData<{results:Row[];total:number;page:number;limit:number}>(c.env,exploreCacheKey(params));
   return c.json({...data,results:await personalReactions(c.env.DB,data.results,c.get('user')?.id||0)});
 });

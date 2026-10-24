@@ -20,9 +20,11 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
       }
       run(scenario) {
         const sql=this.ctx.storage.sql,ledger=this.ledger;
+        const change=(day,mutate)=>{const state=JSON.parse(sql.exec('SELECT state FROM read_budget_compact_days WHERE day=?',day).one().state);mutate(state);sql.exec('UPDATE read_budget_compact_days SET state=? WHERE day=?',JSON.stringify(state),day);};
         const claim=(id,tier='public')=>({id:'request-'+id,rows:1,route:'/measured',tier});
         if(scenario==='rollover-denials') {
-          for(let n=0;n<1500;n++)sql.exec("INSERT INTO read_budget_leases(id,day,tier,route,reserved,started,minute,status) VALUES(?,?,'public','/old',3000,?,?,'unknown')",'old-'+n,day,now,Math.floor(now/60000));
+          for(let n=0;n<1500;n++)sql.exec("INSERT INTO read_budget_compact_leases(id,day,tier,route,reserved,started,minute,status) VALUES(?,?,'public','/old',3000,?,?,'unknown')",'old-'+n,day,now,Math.floor(now/60000));
+          change(day,state=>{state.unresolved=4500000;state.charged=4500000;});
           const beforeReads=this.reads,beforeWrites=this.writes,tomorrow=now+86400000;
           for(let n=0;n<1000;n++)if(ledger.reserve(claim('rollover-'+n),tomorrow).reason!=='daily_budget')throw Error('Carry bypass');
           const deniedReads=this.reads-beforeReads;
@@ -35,11 +37,8 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
           return {scenario,deniedReads,statusReads,writes:restartWrites-beforeWrites,restartReads:this.reads-restartReads,restartWrites:this.writes-restartWrites};
         }
         if(scenario==='worst-cleanup') {
-          sql.exec('INSERT INTO read_budget_days(day,charged) VALUES(?,0)','2026-10-16');
-          sql.exec("INSERT INTO read_budget_leases(id,day,tier,route,reserved,started,minute,status) VALUES('old-lease','2026-10-16','public','/old',1,1,1,'settled')");
-          sql.exec("INSERT INTO read_budget_routes(day,route,tier) VALUES('2026-10-16','/old','public')");
-          sql.exec('INSERT INTO read_budget_minutes(minute) VALUES(1)');
-          sql.exec('UPDATE read_budget_days SET operations=?,charged=? WHERE day=?',READ_BUDGET_POLICY.ledgerWarningOperations-1,3499999,day);
+          sql.exec("INSERT INTO read_budget_compact_leases(id,day,tier,route,reserved,started,minute,status) VALUES('old-lease','2026-10-16','public','/old',1,1,1,'settled')");
+          change(day,state=>{state.operations=READ_BUDGET_POLICY.ledgerWarningOperations-1;state.ledgerRows=state.operations*READ_BUDGET_POLICY.ledgerRowsPerOperation;state.charged=3499999;});
         }
         const before=this.writes;
         if(scenario==='cap') {
@@ -71,18 +70,18 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
   for(const scenario of ['ordinary','worst-cleanup','overrun']) {
     const response=await mf.dispatchFetch('https://local/'+scenario);assert.equal(response.status,200,await response.clone().text());
     const result=await response.json();t.diagnostic(JSON.stringify(result));
-    assert.ok(result.writes<=32,scenario+' exceeds the conservative lifecycle allocation');
+    assert.ok(result.writes<=8,scenario+' exceeds the conservative lifecycle allocation');
     assert.equal(result.duplicateUnknownWrites,0);assert.equal(result.duplicateSuccessWrites,0);
   }
   const response=await mf.dispatchFetch('https://local/cap');assert.equal(response.status,200,await response.clone().text());
   const capped=await response.json();t.diagnostic(JSON.stringify(capped));
-  assert.equal(capped.denialWrites,0);assert.equal(capped.operations,2000);
+  assert.equal(capped.denialWrites,0);assert.equal(capped.operations,capped.policy.ledgerTotalOperations);
   assert.ok(capped.writes<=capped.operations*capped.policy.ledgerRowsPerOperation);
   const rolloverResponse=await mf.dispatchFetch('https://local/rollover-denials');assert.equal(rolloverResponse.status,200,await rolloverResponse.clone().text());
   const rollover=await rolloverResponse.json();t.diagnostic(JSON.stringify(rollover));
   assert.ok(rollover.deniedReads<=5000,'a historical carry scan must not repeat for each denial');
   assert.ok(rollover.statusReads<=5000,'status polling must reuse the same conservative rollover preview');
-  assert.ok(rollover.writes<=2,'rollover may insert only its one durable carry row');
+  assert.ok(rollover.writes<=1,'rollover may insert only its one durable carry row');
   assert.ok(rollover.restartReads<=25_000,'cold refusals must not rescan historical leases');
   assert.equal(rollover.restartWrites,0);
 });

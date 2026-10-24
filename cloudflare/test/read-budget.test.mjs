@@ -13,6 +13,17 @@ function fixture(rows=0) {
 }
 let seq=0;
 const claim=(rows=100,tier='public',route='/word/:id')=>({id:'request-'+(++seq),rows,tier,route});
+function changeState(f,day,change) {
+  const state=JSON.parse(f.db.prepare('SELECT state FROM read_budget_compact_days WHERE day=?').get(day).state);
+  change(state);f.db.prepare('UPDATE read_budget_compact_days SET state=? WHERE day=?').run(JSON.stringify(state),day);
+}
+function legacySchema(f) {
+  f.db.exec(`CREATE TABLE read_budget_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL,measured INTEGER NOT NULL DEFAULT 0,baseline INTEGER NOT NULL DEFAULT 0,denied INTEGER NOT NULL DEFAULT 0,tripped TEXT,alerted INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE read_budget_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER);
+    CREATE TABLE read_budget_minutes(minute INTEGER PRIMARY KEY,charged INTEGER NOT NULL DEFAULT 0,essential INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE read_budget_routes(day TEXT NOT NULL,route TEXT NOT NULL,tier TEXT NOT NULL,charged INTEGER NOT NULL DEFAULT 0,measured INTEGER NOT NULL DEFAULT 0,queries INTEGER NOT NULL DEFAULT 0,writes INTEGER NOT NULL DEFAULT 0,denied INTEGER NOT NULL DEFAULT 0,unknown INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(day,route,tier));
+    DELETE FROM read_budget_compact_days;`);
+}
 
 test('public allowance is 4.5m; importer pauses first; essential reserve stops at 4.9m',()=>{
   const f=fixture(3_499_950);
@@ -134,11 +145,83 @@ test('storage admissions are nonrefundable, retain an essential reserve, and sur
 
 test('legacy admitted queries consume the storage allowance during migration',()=>{
   const f=fixture();
+  legacySchema(f);
+  f.db.prepare('INSERT INTO read_budget_days(day,charged) VALUES(?,?)').run(day,12345);
   f.db.prepare('INSERT INTO read_budget_routes(day,route,tier,queries) VALUES(?,?,?,?)').run(day,'/legacy','public',7770);
-  f.db.exec('ALTER TABLE read_budget_days DROP COLUMN operations');
   const upgraded=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
   assert.equal(upgraded.status(start).usage.operations,7770);
+  assert.equal(upgraded.status(start).usage.ledgerRows,7770*32);
+  assert.equal(upgraded.status(start).usage.charged,12345);
   assert.equal(upgraded.reserve(claim(1,'essential'),start).reason,'do_storage_budget');
+  const before=f.db.prepare('SELECT total_changes() AS n').get().n;
+  const restarted=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(restarted.reserve(claim(1,'essential'),start).reason,'do_storage_budget');
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,before);
+  f.db.close();
+});
+
+test('legacy pending and unknown leases migrate without refunds or lost concurrency',()=>{
+  const f=fixture();legacySchema(f);
+  f.db.exec('ALTER TABLE read_budget_days ADD COLUMN operations INTEGER NOT NULL DEFAULT 0');
+  f.db.prepare('INSERT INTO read_budget_days(day,charged,baseline,operations) VALUES(?,?,?,?)').run(day,1400,1000,4);
+  f.db.prepare('INSERT INTO read_budget_routes(day,route,tier,charged,queries) VALUES(?,?,?,?,?)').run(day,'/legacy','public',400,4);
+  for(let n=0;n<4;n++)f.db.prepare('INSERT INTO read_budget_leases(id,day,tier,route,reserved,started,minute,status) VALUES(?,?,?,?,?,?,?,?)').run('legacy-'+n,day,'public','/legacy',100,start,Math.floor(start/60000),'pending');
+  const upgraded=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(upgraded.status(start).usage.charged,1400);
+  assert.equal(upgraded.status(start).usage.ledgerRows,128);
+  assert.equal(upgraded.reserve(claim(1),start).reason,'concurrency');
+  upgraded.settle('legacy-0',null,0,start);
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(restart.status(start).usage.charged,1400);
+  restart.settle('legacy-0',20,2,start);
+  assert.equal(restart.status(start).usage.charged,1320);
+  assert.equal(restart.status(start).routes[0].writes,2);
+  assert.equal(restart.reserve({...claim(1),id:'legacy-0'},start).reason,'replayed_reservation');
+  const tomorrow=start+86400000;
+  assert.equal(restart.status(tomorrow).usage.charged,300);
+  restart.settle('legacy-1',5,0,tomorrow);
+  assert.equal(restart.status(tomorrow).usage.charged,300);
+  assert.equal(restart.status(tomorrow).usage.ledgerRows,8);
+  assert.equal(f.db.prepare("SELECT status FROM read_budget_leases WHERE id='legacy-0'").get().status,'pending','legacy evidence stays immutable');
+  const future=start+5*86400000;
+  for(let n=0;n<12;n++){const r=restart.reserve(claim(1),future);assert.equal(r.allowed,true);restart.settle(r.id,0,0,future);}
+  const before=restart.status(future).usage;
+  assert.equal(restart.settle('legacy-0',0,0,future).settled,false,'cleanup must not resurrect the original pending legacy lease');
+  assert.deepEqual(restart.status(future).usage,before);
+  f.db.close();
+});
+
+test('a failed compact state write rolls back its lease and never admits SQL',()=>{
+  const f=fixture(),exec=f.store.sql.exec;let fail=false;
+  f.store.sql.exec=(sql,...args)=>{if(fail&&sql.startsWith('INSERT INTO read_budget_compact_days'))throw Error('Storage write failed');return exec(sql,...args);};
+  const request=claim(100);fail=true;
+  assert.throws(()=>f.ledger.reserve(request,start),/Storage write failed/);
+  assert.equal(f.ledger.status(start).usage.charged,0);
+  assert.equal(f.ledger.status(start).usage.operations,0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM read_budget_compact_leases').get().n,0);
+  fail=false;assert.equal(f.ledger.reserve(request,start).allowed,true);
+  fail=true;assert.throws(()=>f.ledger.settle(request.id,1,0,start),/Storage write failed/);
+  fail=false;
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(restart.status(start).usage.charged,100);
+  assert.equal(restart.settle(request.id,1,0,start).settled,true);
+  assert.equal(restart.status(start).usage.charged,1);
+  f.db.close();
+});
+
+test('compact route and minute state stays bounded and retains accounting after eviction',()=>{
+  const f=fixture();
+  for(let n=0;n<300;n++) {
+    const now=start+n*60000,r=f.ledger.reserve(claim(1,'public','/dynamic-'+n),now);
+    assert.equal(r.allowed,true);f.ledger.settle(r.id,1,0,now);
+  }
+  const state=JSON.parse(f.db.prepare('SELECT state FROM read_budget_compact_days WHERE day=?').get(day).state);
+  assert.ok(Object.keys(state.routes).length<=128);
+  assert.equal(Object.values(state.routes).reduce((n,r)=>n+r.queries,0),300);
+  assert.equal(Object.values(state.routes).reduce((n,r)=>n+r.measured,0),300);
+  assert.equal(Object.keys(state.minutes).length,300);
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  assert.equal(restart.status(start+300*60000).usage.charged,300);
   f.db.close();
 });
 
@@ -149,7 +232,7 @@ test('refusals never write cleanup or expiry and UTC rollover persists only one 
   assert.equal(f.ledger.reserve(claim(1),start).reason,'concurrency');
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,before);
   const later=start+120_000,minute=Math.floor(later/60_000);
-  f.db.prepare('INSERT INTO read_budget_minutes(minute,charged) VALUES(?,?)').run(minute,READ_BUDGET_POLICY.minuteRows);
+  changeState(f,day,state=>{state.minutes[minute]={charged:READ_BUDGET_POLICY.minuteRows,essential:0};});
   const burned=f.db.prepare('SELECT total_changes() AS n').get().n;
   assert.equal(f.ledger.reserve(claim(1),later).reason,'burn_rate');
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,burned,'expired leases stay untouched during denial');
@@ -178,7 +261,7 @@ test('unknown settlement retries are idempotent and late settlements pay todays 
   assert.equal(f.ledger.status(tomorrow).usage.operations,1);
   assert.equal(f.ledger.status(tomorrow).usage.charged,100,'late success cannot refund the conservative carry');
   const other=f.ledger.reserve(claim(100),start+1000);
-  f.db.prepare('UPDATE read_budget_days SET operations=? WHERE day=?').run(READ_BUDGET_POLICY.ledgerTotalOperations,'2026-10-23');
+  changeState(f,'2026-10-23',state=>{state.ledgerRows=READ_BUDGET_POLICY.ledgerTotalRows;});
   const closed=f.db.prepare('SELECT total_changes() AS n').get().n;
   assert.equal(f.ledger.settle(other.id,10,0,tomorrow).reason,'do_storage_budget');
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,closed);
