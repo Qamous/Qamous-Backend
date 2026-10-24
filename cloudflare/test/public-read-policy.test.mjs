@@ -14,6 +14,7 @@ test('snapshot pause and native read limiting work while every database and Dura
       const url=new URL(request.url),mode=request.headers.get('x-test-mode');
       const safe={...env,DB:denied,RUNTIME:denied,READ_BUDGET:denied,PUBLIC_CACHE:denied,COORDINATOR:denied};
       if(mode==='status-probe')safe.COORDINATOR={getByName(){return {status:async()=>({state:'waiting_for_free_quota',cursor:42,halted:false}),recoverBaseline:async()=>({state:'retry_pending',cursor:42})};}};
+      if(mode==='export-probe')safe.READ_BUDGET={getByName(){return {reserve:async input=>({allowed:true,...input})};}};
       if(mode==='native'||mode==='native-missing')safe.PUBLIC_READ_ONLY='false';
       if(mode==='native-missing')safe.PUBLIC_READ_RATE_LIMIT=undefined;
       if(url.pathname==='/__touches')return Response.json({touches});
@@ -46,6 +47,17 @@ test('snapshot pause and native read limiting work while every database and Dura
     for(const path of ['/','/robots.txt','/__import/health']) {
       const result=await call(path,{cookie:true});assert.equal(result.status,200,await result.text());
     }
+  });
+  await t.test('paused recovery export can only reserve a fixed conservative read charge with admin authentication',async()=>{
+    assert.equal((await call('/__import/recovery-export-budget',{method:'POST',mode:'export-probe'})).status,401);
+    const result=await call('/__import/recovery-export-budget',{method:'POST',mode:'export-probe',auth:true});
+    assert.equal(result.status,200);
+    const admission=await result.json();
+    assert.equal(admission.rows,250000);
+    assert.equal(admission.tier,'essential');
+    assert.equal(admission.route,'maintenance:recovery-export');
+    assert.equal((await call('/__import/tick',{method:'POST',mode:'export-probe',auth:true})).status,503);
+    assert.equal((await call('/__import/read-budget/reserve',{method:'POST',mode:'export-probe',auth:true})).status,503);
   });
   await t.test('all dynamic reads and mutations stop before persistent bindings',async()=>{
     for(const [method,path] of [['GET','/auth/health'],['GET','/auth/session'],['GET','/seo/word/1'],['HEAD','/definitions/feed'],

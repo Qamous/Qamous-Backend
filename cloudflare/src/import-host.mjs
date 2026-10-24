@@ -123,10 +123,17 @@ export default {
     if(!await isAuthorized(request,env))return response({error:'Unauthorized'},401);
     // Authenticated inspection and the narrowly checked pre-D1 baseline repair
     // are available during pause; neither endpoint submits an import packet.
-    if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET')&&!(url.pathname==='/recover-baseline'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
+    if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET')&&!(url.pathname==='/recover-baseline'&&request.method==='POST')&&!(url.pathname==='/recovery-export-budget'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
       {status:503,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Retry-After':'60'}});
-    const stub=coordinator(env);
     try {
+      // Admission only: this cannot run SQL or resume writers. Keep the full
+      // conservative export charge; never refund an unmeasured D1 export.
+      if(url.pathname==='/recovery-export-budget'&&request.method==='POST') {
+        if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Recovery export requires ingestion to remain paused'},409);
+        const {id}=await boundedJson(request,1024);
+        return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserve({id,rows:250000,route:'maintenance:recovery-export',tier:'essential'}));
+      }
+      const stub=coordinator(env);
       if(url.pathname==='/recover-baseline'&&request.method==='POST'){
         if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Baseline recovery requires ingestion to remain explicitly paused'},409);
         return response(await stub.recoverBaseline(await boundedJson(request,2048)));
