@@ -81,6 +81,8 @@ test('UTC rollover pauses new work, carries uncertain work, and starts the next 
 
 test('baseline reconciliation is fresh, upward only, and cannot clear an overrun',()=>{
   const f=fixture(100);
+  assert.equal(f.ledger.reconcile({day,rowsRead:1,observedAt:new Date(start+5_000).toISOString()},start).usage.charged,100);
+  assert.throws(()=>f.ledger.reconcile({day,rowsRead:1,observedAt:new Date(start+5_001).toISOString()},start));
   assert.throws(()=>f.ledger.reconcile({day,rowsRead:0,observedAt:new Date(start-301_000).toISOString()},start));
   assert.throws(()=>f.ledger.reconcile({day:'2026-10-21',rowsRead:0,observedAt:new Date(start).toISOString()},start));
   assert.equal(f.ledger.reconcile({day,rowsRead:1,observedAt:new Date(start).toISOString()},start).usage.charged,100);

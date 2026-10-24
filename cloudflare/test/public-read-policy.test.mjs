@@ -13,7 +13,7 @@ test('snapshot pause and native read limiting work while every database and Dura
     export default {async fetch(request,env,ctx) {
       const url=new URL(request.url),mode=request.headers.get('x-test-mode');
       const safe={...env,DB:denied,RUNTIME:denied,READ_BUDGET:denied,PUBLIC_CACHE:denied,COORDINATOR:denied};
-      if(mode==='status-probe')safe.COORDINATOR={getByName(){return {status:async()=>({state:'waiting_for_free_quota',cursor:42,halted:false})};}};
+      if(mode==='status-probe')safe.COORDINATOR={getByName(){return {status:async()=>({state:'waiting_for_free_quota',cursor:42,halted:false}),recoverBaseline:async()=>({state:'retry_pending',cursor:42})};}};
       if(mode==='native'||mode==='native-missing')safe.PUBLIC_READ_ONLY='false';
       if(mode==='native-missing')safe.PUBLIC_READ_RATE_LIMIT=undefined;
       if(url.pathname==='/__touches')return Response.json({touches});
@@ -73,6 +73,9 @@ test('snapshot pause and native read limiting work while every database and Dura
     for(const [method,path] of [['POST','/tick'],['GET','/read-budget'],['POST','/read-budget/reserve']])
       assert.equal((await call('/__import'+path,{method,auth:true,mode:'status-probe'})).status,503);
     assert.equal((await call('/__import/status',{mode:'status-probe'})).status,401);
+    assert.equal((await call('/__import/recover-baseline',{method:'POST',mode:'status-probe'})).status,401);
+    const recovery=await call('/__import/recover-baseline',{method:'POST',mode:'status-probe',auth:true});
+    assert.equal(recovery.status,200);assert.deepEqual(await recovery.json(),{state:'retry_pending',cursor:42});
   });
   await t.test('native limiter permits normal anonymous reads then rejects excess without Durable Objects',async()=>{
     for(let i=0;i<2;i++) {
