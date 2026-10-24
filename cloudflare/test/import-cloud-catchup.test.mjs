@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {IMPORT_ACCOUNT,IMPORT_MANIFEST,CLOUD_PACKET_RESERVE,importPolicyAt,importQuota,quotaRetryAt,recoverCloudFlight} from '../src/import-cloud-policy.mjs';
-import {runCloudImport} from '../src/import-cloud.mjs';
+import {runCloudImport,recoverBaselineHalt,BASELINE_HALT_REASON} from '../src/import-cloud.mjs';
 
 const at=time=>new Date('2026-10-21T'+time+'Z');
 const state=writes=>({days:{'2026-10-21':{initialAccountWrites:0,rowsWritten:writes,rowsRead:0}}});
@@ -93,4 +93,50 @@ test('global read guard pauses import before SQL even when analytics report low 
   f.env.READ_BUDGET.getByName=()=>({reconcile:async()=>({}),reserve:async()=>({allowed:false,reason:'import_paused',retryAfter:3600})});
   const result=await runCloudImport(f.env,'scheduled',f.deps);
   assert.equal(result.state,'waiting_for_free_quota');assert.equal(f.batches,0);assert.equal(result.cursor,0);
+});
+
+test('baseline clock rejection is retryable before any D1 work',async()=>{
+  const f=await fixture();f.env.READ_BUDGET.getByName=()=>({reconcile:async()=>{throw Error(BASELINE_HALT_REASON);}});
+  const result=await runCloudImport(f.env,'scheduled',f.deps);
+  assert.equal(result.state,'retry_pending');assert.equal(result.halted,false);assert.equal(result.cursor,0);assert.equal(f.batches,0);
+});
+
+async function haltedFixture(change={}) {
+  const f=await fixture(),key=f.key+'checkpoint.json';
+  const state=JSON.parse(await (await f.objects.get(key)).text());
+  Object.assign(state,{halted:true,status:'halted',reason:BASELINE_HALT_REASON,nextAttemptAt:null},change);
+  await f.objects.put(key,JSON.stringify(state));
+  const expected=Object.fromEntries(['jobHash','manifestHash','cursor','completedRecords','lastAttemptAt'].map(k=>[k,state[k]]));
+  f.env.READ_BUDGET.getByName=()=>({reconcile:async input=>({day:input.day,initialized:true,usage:{charged:input.rowsRead,tripped:null}})});
+  f.env.DB=new Proxy({},{get(){throw Error('Baseline repair must never access D1');}});
+  return {...f,key,state,expected};
+}
+
+test('precise baseline halt recovery reconciles fresh usage without a packet or checkpoint advance',async()=>{
+  const f=await haltedFixture(),before=f.state;
+  const result=await recoverBaselineHalt(f.env,f.expected,f.deps);
+  assert.equal(result.state,'retry_pending');assert.equal(result.halted,false);assert.equal(result.cursor,before.cursor);assert.equal(result.completedRecords,before.completedRecords);
+  const after=JSON.parse(await (await f.objects.get(f.key)).text());
+  assert.deepEqual(after.days,before.days);assert.equal(after.lastAttemptAt,before.lastAttemptAt);assert.equal(after.baselineRecovery.previousReason,BASELINE_HALT_REASON);
+  assert.equal(f.batches,0);
+});
+
+test('recovery refuses other halts, checkpoint identity changes and uncertain/leased packets unchanged',async()=>{
+  for(const change of [{reason:'Immutable job manifest mismatch'},{inFlight:{index:0}},{lease:{id:'old',expiresAt:'2020-01-01'}},{halted:false},{status:'retry_pending'}]) {
+    const f=await haltedFixture(change),before=await (await f.objects.get(f.key)).text();
+    await assert.rejects(recoverBaselineHalt(f.env,f.expected,f.deps),/verified pre-D1/);
+    assert.equal(await (await f.objects.get(f.key)).text(),before);
+  }
+  const f=await haltedFixture();await assert.rejects(recoverBaselineHalt(f.env,{...f.expected,cursor:1},f.deps),/verified pre-D1/);
+});
+
+test('recovery preserves halt when provider baseline, ledger circuit or ownership cannot be verified',async()=>{
+  for(const failure of ['provider','circuit','stale-day','ownership']) {
+    const f=await haltedFixture(),before=await (await f.objects.get(f.key)).text();
+    if(failure==='provider')f.deps.usage=async()=>{throw Error('Provider unavailable');};
+    if(failure==='circuit')f.env.READ_BUDGET.getByName=()=>({reconcile:async input=>({day:input.day,initialized:true,usage:{charged:input.rowsRead,tripped:'reservation_exceeded'}})});
+    if(failure==='stale-day')f.deps.usage=async()=>({day:'2026-10-20',rowsRead:0,rowsWritten:0});
+    if(failure==='ownership')f.objects.put=async()=>null;
+    await assert.rejects(recoverBaselineHalt(f.env,f.expected,f.deps));assert.equal(await (await f.objects.get(f.key)).text(),before);
+  }
 });

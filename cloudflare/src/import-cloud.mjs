@@ -7,6 +7,7 @@ const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const prefix=env=>'jobs/'+env.IMPORT_JOB_HASH+'/';
 const stateKey=env=>prefix(env)+'checkpoint.json';
+export const BASELINE_HALT_REASON='A current-day, recently observed account read baseline is required';
 async function boundedObject(bucket,key,max=IMPORT_LIMITS.objectBytes) {
   const object=await bucket.get(key);
   if(!object)return null;
@@ -86,10 +87,11 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     if(!env.CLOUDFLARE_READ_TOKEN){const error=Error('A persistent Billing Read, Account Analytics Read and D1 Read token is required');error.code='BILLING_READ_REQUIRED';throw error;}
     const proof=await (dependencies.billing||fetchBillingProof)(env.CLOUDFLARE_READ_TOKEN);
     if(proof.accountId!==IMPORT_ACCOUNT)throw Error('Unexpected billing account');
+    const observedAt=(dependencies.now?.()||new Date()).toISOString();
     const usage=await (dependencies.usage||accountUsage)(env.CLOUDFLARE_READ_TOKEN);
     // Analytics are only an upward reconciliation signal. They never authorize
     // work: the shared coordinator makes every pre-D1 admission synchronously.
-    await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile({...usage,observedAt:new Date().toISOString()});
+    await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile({...usage,observedAt});
     const quota=importQuota(state,usage,now);
     state.days[quota.day]??={...quota.budget,initialAccountReads:usage.rowsRead};
     state.accountUsage=usage;state.effectiveWrites=quota.effectiveWrites;state.planVerifiedAt=proof.observedAt;state.quotaPolicy=quota.policy;
@@ -169,7 +171,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     const quota=error.code==='D1_READ_BUDGET'||/D1.*(exceeded|quota|daily limit)|(exceeded|quota|daily limit).*D1/i.test(message);
     const briefBudgetHold=error.code==='D1_READ_BUDGET'&&['burn_rate','concurrency','import_concurrency','coordinator_unavailable'].includes(error.reason);
     const access=error.code==='BILLING_READ_REQUIRED';
-    const retry=error.code==='RETRY_NETWORK'||/network|fetch failed|timed? ?out|temporar|overloaded|internal error|try again|database (busy|locked)|429|50[0234]/i.test(message);
+    const retry=message===BASELINE_HALT_REASON||error.code==='RETRY_NETWORK'||/network|fetch failed|timed? ?out|temporar|overloaded|internal error|try again|database (busy|locked)|429|50[0234]/i.test(message);
     state.consecutiveFailures=(state.consecutiveFailures||0)+1;
     state.status=quota?'waiting_for_free_quota':access?'needs_access':retry?'retry_pending':'halted';state.halted=!quota&&!access&&!retry;
     state.reason=message;state.lastAttemptAt=started;
@@ -180,6 +182,29 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     return publicStatus(state);
   }
 }
+export async function recoverBaselineHalt(env,expected,dependencies={}) {
+  const loaded=await boundedObject(env.IMPORTS,stateKey(env),131072);
+  if(!loaded)throw Error('Existing checkpoint is required');
+  const state=loaded.data;
+  if(!expected||state.jobHash!==env.IMPORT_JOB_HASH||state.manifestHash!==IMPORT_MANIFEST
+    ||['jobHash','manifestHash','cursor','completedRecords','lastAttemptAt'].some(key=>expected[key]!==state[key])
+    ||!state.halted||state.status!=='halted'||state.reason!==BASELINE_HALT_REASON||state.inFlight||state.lease)
+    throw Error('Checkpoint is not the verified pre-D1 baseline halt');
+  if(!env.CLOUDFLARE_READ_TOKEN)throw Error('Existing account read credential is required');
+  const now=dependencies.now?.()||new Date(),observedAt=now.toISOString();
+  const proof=await (dependencies.billing||fetchBillingProof)(env.CLOUDFLARE_READ_TOKEN);
+  if(proof.accountId!==IMPORT_ACCOUNT)throw Error('Unexpected billing account');
+  const usage=await (dependencies.usage||accountUsage)(env.CLOUDFLARE_READ_TOKEN);
+  const reconciled=await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile({...usage,observedAt});
+  if(usage.day!==observedAt.slice(0,10)||reconciled?.day!==usage.day||!reconciled.initialized||!reconciled.usage
+    ||reconciled.usage.tripped||reconciled.usage.charged<usage.rowsRead)
+    throw Error('Fresh baseline did not verify an operational read ledger');
+  state.baselineRecovery={recoveredAt:observedAt,previousReason:state.reason,previousAttemptAt:state.lastAttemptAt,accountUsage:usage};
+  state.halted=false;state.status='retry_pending';state.reason='Fresh account baseline verified; awaiting guarded import tick';state.nextAttemptAt=observedAt;
+  await saveState(env,state,loaded.etag);
+  return publicStatus(state);
+}
+
 export function publicStatus(state) {
   return {state:state.status,jobHash:state.jobHash,manifestHash:state.manifestHash,reason:state.reason,cursor:state.cursor,packetCount:state.packetCount,completedRecords:state.completedRecords,totalRecords:state.totalRecords,databaseBytes:state.databaseBytes,days:state.days,effectiveWrites:state.effectiveWrites,accountUsage:state.accountUsage,quotaPolicy:state.quotaPolicy||importPolicyAt(),nextAttemptAt:state.nextAttemptAt,lastAttemptAt:state.lastAttemptAt,lastScheduledAt:state.lastScheduledAt,lastSuccessAt:state.lastSuccessAt,verifiedScheduledBatch:state.verifiedScheduledBatch,lastPacket:state.lastPacket,recoveredPackets:state.recoveredPackets||0,halted:Boolean(state.halted),updatedAt:state.updatedAt};
 }

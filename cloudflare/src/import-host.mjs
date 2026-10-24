@@ -1,7 +1,7 @@
 // Private, card-free staging and checkpoints in one SQLite Durable Object.
 // The same reviewed D1 importer is shared with the original R2 implementation.
 import {DurableObject} from 'cloudflare:workers';
-import {runCloudImport,publicStatus} from './import-cloud.mjs';
+import {runCloudImport,publicStatus,recoverBaselineHalt} from './import-cloud.mjs';
 import {READ_BUDGET_OBJECT} from './read-budget.ts';
 import {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION,validatePublicSeed} from './public-cache-keys.ts';
 import {IMPORT_MANIFEST,IMPORT_LIMITS} from './import-cloud-policy.mjs';
@@ -95,6 +95,7 @@ export class QamousImportState extends DurableObject {
   }
   storageStatus(){const row=this.ctx.storage.sql.exec('SELECT pages,bytes,deletedPages,lastCleanupAt,lastScheduledAt FROM import_storage WHERE id=1').one();return {backend:'Free SQLite Durable Object',remainingPages:row.pages,remainingBytes:row.bytes,databaseBytes:this.ctx.storage.sql.databaseSize,consumedPagesDeleted:row.deletedPages,lastCleanupAt:row.lastCleanupAt,lastScheduledAt:row.lastScheduledAt,cleanup:'after verified D1 commit and durable checkpoint'};}
   async status(){const loaded=await this.objects.get(prefix(this.env)+'checkpoint.json');const staging=this.storageStatus();return {...(loaded?publicStatus(JSON.parse(await loaded.text())):{state:'not_armed'}),lastScheduledAt:staging.lastScheduledAt,staging};}
+  async recoverBaseline(expected){const baseline=JSON.parse(this.env.FREE_PLAN_BASELINE||'null');return recoverBaselineHalt({...this.env,IMPORTS:this.objects},expected,{billing:()=>fetchHostedFreeGuard(this.env.CLOUDFLARE_READ_TOKEN,baseline)});}
 }
 
 async function isAuthorized(request,env){
@@ -120,12 +121,16 @@ export default {
     const url=new URL(request.url);
     if(url.pathname==='/health'&&request.method==='GET')return response({service:'qamous-import',version:2,staging:'Free SQLite Durable Object',configured:/^[a-f0-9]{64}$/.test(env.IMPORT_JOB_HASH)});
     if(!await isAuthorized(request,env))return response({error:'Unauthorized'},401);
-    // An authenticated checkpoint inspection may probe DO availability without
-    // advancing ingestion, clearing holds, or opening any maintenance writes.
-    if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
+    // Authenticated inspection and the narrowly checked pre-D1 baseline repair
+    // are available during pause; neither endpoint submits an import packet.
+    if(env.PUBLIC_READ_ONLY==='true'&&!(url.pathname==='/status'&&request.method==='GET')&&!(url.pathname==='/recover-baseline'&&request.method==='POST'))return Response.json({error:'Imports and maintenance are paused while the public snapshot is active',code:'PUBLIC_READ_ONLY'},
       {status:503,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Retry-After':'60'}});
     const stub=coordinator(env);
     try {
+      if(url.pathname==='/recover-baseline'&&request.method==='POST'){
+        if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Baseline recovery requires ingestion to remain explicitly paused'},409);
+        return response(await stub.recoverBaseline(await boundedJson(request,2048)));
+      }
       if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
       if(url.pathname==='/read-budget/reconcile'&&request.method==='POST') {
         return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile(await boundedJson(request,1024)));

@@ -194,7 +194,9 @@ export class ReadBudgetLedger {
     });
   }
   reconcile(input:{day:string;rowsRead:number;observedAt:string},now=Date.now()) {
-    if(!input||input.day!==dayAt(now)||!validInteger(input.rowsRead)||!Number.isFinite(Date.parse(input.observedAt))||Date.parse(input.observedAt)>now||now-Date.parse(input.observedAt)>300_000)throw Error('A current-day, recently observed account read baseline is required');
+    // Independent Worker/DO clocks can differ slightly. This signal only raises
+    // charged usage; a five-second clock allowance cannot grant extra reads.
+    if(!input||input.day!==dayAt(now)||!validInteger(input.rowsRead)||!Number.isFinite(Date.parse(input.observedAt))||Date.parse(input.observedAt)>now+5_000||now-Date.parse(input.observedAt)>300_000)throw Error('A current-day, recently observed account read baseline is required');
     return this.store.transactionSync(()=>{
       const sql=this.store.sql;
       const row=this.current(now);
