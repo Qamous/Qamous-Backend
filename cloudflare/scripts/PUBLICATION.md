@@ -58,7 +58,7 @@ public-definition count, resource byte counts, filenames and SHA-256 hashes
 must pass auditing. Every payload is checked for private fields before the first
 seed request. A recently rebuilt projection cannot renew an old export's age.
 Never edit timestamps or rebuild older SQL merely to renew a build time.
-Seeding is sequential, with batches bounded to both 50 cards and 1.8 MB. It
+Seeding is sequential, with CLI batches bounded to both 10 cards and 160 KB. It
 compares database/snapshot counts before submitting and requires matching
 prepared/eligible/snapshot card counts, matching feed counts and zero missing
 payloads afterward. Reports are written under
@@ -67,6 +67,12 @@ payloads afterward. Reports are written under
 An admission-specific `prepared-card-migration-<id>.json` is saved before any
 remote SQL and updated before submission, so an interrupted migration retains
 its reservation identity and uncertain-outcome evidence.
+
+The CLI submits at most 10 cards and 160 KB per request, below the server's hard
+limits, and closes each maintenance HTTP connection. A transport failure stops
+the run without an automatic retry. Inspect authenticated status and confirm
+writers are still paused before restarting against the same audited snapshot;
+identical already-prepared payloads are not rewritten.
 
 The frozen frontend continues serving its own reviewed static snapshot during
 this work; prepared-table maintenance cannot make an old snapshot current.

@@ -20,9 +20,9 @@ export function preparedSeedBatches(cards) {
   const batches=[];let batch=[];
   for(const card of cards) {
     const next=[...batch,card];
-    if(next.length>50||Buffer.byteLength(JSON.stringify({cards:next}))>1_800_000){if(!batch.length)throw Error('Prepared card exceeds its maintenance batch size');batches.push(batch);batch=[card];}
+    if(next.length>10||Buffer.byteLength(JSON.stringify({cards:next}))>160_000){if(!batch.length)throw Error('Prepared card exceeds its maintenance batch size');batches.push(batch);batch=[card];}
     else batch=next;
-    if(Buffer.byteLength(JSON.stringify({cards:batch}))>1_800_000)throw Error('Prepared card exceeds its maintenance batch size');
+    if(Buffer.byteLength(JSON.stringify({cards:batch}))>160_000)throw Error('Prepared card exceeds its maintenance batch size');
   }
   if(batch.length)batches.push(batch);return batches;
 }
@@ -76,7 +76,7 @@ async function maintenanceAccess() {
   return access;
 }
 async function call(access,path,body) {
-  const reply=await fetch(access.url+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+access.adminToken,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(60_000)});
+  const reply=await fetch(access.url+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+access.adminToken,'Content-Type':'application/json','Connection':'close'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(60_000)});
   if(!reply.ok)throw Error('Prepared maintenance failed at '+path+' (HTTP '+reply.status+'); inspect before retrying');
   return reply.json();
 }
