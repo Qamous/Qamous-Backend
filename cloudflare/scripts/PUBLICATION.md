@@ -68,6 +68,12 @@ An admission-specific `prepared-card-migration-<id>.json` is saved before any
 remote SQL and updated before submission, so an interrupted migration retains
 its reservation identity and uncertain-outcome evidence.
 
+The CLI submits at most 10 cards and 160 KB per request, below the server's hard
+limits, and closes each maintenance HTTP connection. A transport failure stops
+the run without an automatic retry. Inspect authenticated status and confirm
+writers are still paused before restarting against the same audited snapshot;
+identical already-prepared payloads are not rewritten.
+
 The frozen frontend continues serving its own reviewed static snapshot during
 this work; prepared-table maintenance cannot make an old snapshot current.
 Publishing new content still requires the static release procedure below.

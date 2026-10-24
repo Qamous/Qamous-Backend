@@ -16,7 +16,8 @@ test('prepared migration tooling permits only migration0009 and bounds both seed
   const cards=Array.from({length:115},(_,n)=>({definitionId:n+1,definition:'ك'.repeat(50_000)}));
   const batches=preparedSeedBatches(cards);
   assert.equal(batches.flat().length,115);
-  assert.ok(batches.every(cards=>cards.length<=50&&Buffer.byteLength(JSON.stringify({cards}))<=1_800_000));
+  assert.ok(batches.every(cards=>cards.length<=10&&Buffer.byteLength(JSON.stringify({cards}))<=160_000));
+  assert.equal(preparedSeedBatches(Array.from({length:21},(_,n)=>({definitionId:n+1}))).length,3);
 });
 
 test('prepared seed audits all hashes and feed coverage before submitting maintenance',async t=>{
@@ -76,6 +77,7 @@ test('prepared administration requires auth, paused writers, explicit readmodel 
       for(const body of [null,[],{}, {cards:[]},{cards:Array.from({length:51},()=>({definitionId:1}))},{cards:[{definitionId:1}],extra:true},{cards:[{definitionId:1,email:'private'}]}])assert.equal((await post('/prepared-cards/seed',body)).status,400);
       const before=await get('/prepared-cards/status').then(r=>r.json());assert.deepEqual(before,{preparedCards:0,feedCandidates:1,eligibleCards:1,missingPayloads:1});
       const result=await post('/prepared-cards/seed',{cards:[{definitionId:1,definition:'Book'}]});assert.equal(result.status,200,await result.clone().text());assert.equal((await result.json()).stored,1);
+      const repeated=await post('/prepared-cards/seed',{cards:[{definitionId:1,definition:'Book'}]});assert.equal(repeated.status,200);assert.equal((await repeated.json()).stored,0,'repeating an acknowledged derived payload makes no D1 content writes');
       const after=await get('/prepared-cards/status').then(r=>r.json());assert.deepEqual(after,{preparedCards:1,feedCandidates:1,eligibleCards:1,missingPayloads:0});
       await admit();
     }finally {await mf.dispose();}
