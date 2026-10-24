@@ -2,6 +2,7 @@ import { ApiError } from './data.ts';
 
 export const PUBLIC_CACHE_PREFIX='qamous-public:v1:';
 export const PUBLIC_CACHE_REVISION=PUBLIC_CACHE_PREFIX+'revision';
+export const PUBLIC_CACHE_CONTENT_V2='qamous-public:contents-v2';
 export function publicItemIds(key:string):number[]|null {
   if(!/^items:[1-9]\d*(?:,[1-9]\d*)*$/.test(key))return null;
   const ids=key.slice(6).split(',').map(Number);

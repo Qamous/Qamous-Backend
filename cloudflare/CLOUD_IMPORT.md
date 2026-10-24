@@ -30,7 +30,15 @@ For a reviewed code update, first verify Workers Free Active in the signed-in ac
 
 If the local monitoring credential was lost, `--recover-monitor` replaces only IMPORT_ADMIN_TOKEN with an equivalent credential in the same access-restricted local folder. CLOUDFLARE_READ_TOKEN remains encrypted in the Worker. Do not run it when a working local credential exists.
 
-To pause publication, remove the Worker's cron and wait for an active lease to finish. Keep the laptop publisher disabled. Roll back code with the version recorded privately before deployment; never overwrite the durable checkpoint or restore an old whole database over later member contributions. Source and batch removals require a fresh backup and a targeted provenance-aware removal rehearsal.
+To publish reviewed importer code while keeping ingestion stopped, use
+`node scripts/deploy-import-cloud.mjs --deploy-paused`. It creates a private
+deployment configuration with the pause enabled and no cron, preserving every
+resource and job identity. `--deploy` publishes the normal checked-in schedule
+only after the frontend snapshot is withdrawn and both API pause flags are
+cleared. Keep the laptop publisher disabled. Roll back code with the version
+recorded privately before deployment; never overwrite the durable checkpoint or
+restore an old whole database over later member contributions. Source and batch
+removals require a fresh backup and a targeted provenance-aware removal rehearsal.
 
 The hosted sources were recovered byte-for-byte from the deployed Worker's source map before this change. They are now versioned with the quota update so future updates do not depend on untracked local files. The deployment record and immutable job are preserved separately in private storage.
 

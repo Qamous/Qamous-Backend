@@ -14,7 +14,7 @@ const age=Date.now()-Date.parse(manifest.builtAt);
 if(!Number.isFinite(age)||age<0||age>4*60*60_000||!Array.isArray(manifest.resources)||manifest.resources.length>50_000)throw Error('Snapshot is missing, expired or invalid. Export a fresh snapshot.');
 const access=JSON.parse(await readFile(new URL('../private/cloud-import/access.json',import.meta.url),'utf8'));
 if(access.url!=='https://qamous-import.anthonyyoussef01.workers.dev'||typeof access.adminToken!=='string'||access.adminToken.length<32)throw Error('Approved importer access is unavailable');
-const headers={Authorization:'Bearer '+access.adminToken,'Content-Type':'application/json'};
+const headers={Authorization:'Bearer '+access.adminToken,'Content-Type':'application/json','Connection':'close'};
 async function call(path,body) {
   // These operations only read metadata or replace the same public cache key.
   // A lost acknowledgement can therefore be retried at the same revision.

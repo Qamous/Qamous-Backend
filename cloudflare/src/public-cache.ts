@@ -2,12 +2,12 @@ import { DurableObject } from 'cloudflare:workers';
 import { ApiError } from './data.ts';
 import { guardD1, ReadBudgetError, READ_BUDGET_OBJECT } from './read-budget';
 import { resolvePublicData } from './public-data.ts';
-import { PublicCacheState } from './public-cache-state.ts';
+import { PublicCacheState,type PublicCacheFreshness } from './public-cache-state.ts';
 import { PublicSqliteCacheStore } from './public-cache-sqlite-store.ts';
-import { PublicCacheRevision } from './public-cache-revision.ts';
+import { BudgetedPublicRevision } from './public-cache-revision-budget.ts';
 import { publicItems } from './public-data.ts';
 import { storePreparedCards } from './public-card-payloads.ts';
-import { PUBLIC_CACHE_PREFIX as PREFIX, PUBLIC_CACHE_REVISION as REVISION, validPublicCacheKey, validatePublicSeed } from './public-cache-keys.ts';
+import { PUBLIC_CACHE_CONTENT_V2 as CONTENT, PUBLIC_CACHE_REVISION as REVISION, validPublicCacheKey, validatePublicSeed } from './public-cache-keys.ts';
 
 const FRESH_MS=15*60_000;
 // Only the exact current scoped revision is eligible. A quota outage may last
@@ -16,33 +16,58 @@ const STALE_MS=7*24*60*60_000;
 interface PublicValue { status: 200 | 404; json: string }
 type PublicReply = { ok: true; payload: PublicValue; state: string } | { ok: false; status: ApiError['status']; message: string; budgetReason?: string; retryAfter?: number };
 
-// One object per public resource coalesces misses across every Cloudflare
-// location. Personal cookies, identities, session state and votes never cross
-// this boundary. The coordinator versions only the resources a mutation touches.
+// One shared SQL cache coalesces each resource's misses across Cloudflare
+// locations with a bounded hot-memory LRU. Personal state never crosses this
+// boundary. The separate coordinator versions only resources a mutation touches.
 export class QamousPublicCache extends DurableObject<Env> {
-  private cache: PublicCacheState;
-  private coordinator?:PublicCacheRevision;
+  private caches=new Map<string,PublicCacheState>();
+  private cacheSizes=new Map<string,number>();
+  private cacheBytes=0;
+  private freshMetadata=new Map<string,PublicCacheFreshness>();
+  private coordinator?:BudgetedPublicRevision;
   constructor(ctx: DurableObjectState,env: Env) {
     super(ctx,env);
-    this.cache=new PublicCacheState(new PublicSqliteCacheStore(ctx.storage,(cost,tier)=>
-      env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reservePublicCacheWrites(cost,tier)));
   }
-  private revisions() {return this.coordinator??=new PublicCacheRevision(this.ctx.storage);}
+  private cacheFor(key:string):PublicCacheState {
+    const known=this.caches.get(key);
+    if(known){this.caches.delete(key);this.caches.set(key,known);return known;}
+    const cache=new PublicCacheState(new PublicSqliteCacheStore(this.ctx.storage,(cost,tier)=>
+      this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reservePublicCacheWrites(cost,tier),key),Date.now,bytes=>{
+        if(this.caches.get(key)!==cache){cache.releaseMemory();return;}
+        this.cacheBytes+=bytes-(this.cacheSizes.get(key)||0);this.cacheSizes.set(key,bytes);this.pruneCaches();
+      },{
+        get:()=>this.freshMetadata.get(key),
+        put:value=>{if((this.freshMetadata.get(key)?.revision||0)>value.revision)return;this.freshMetadata.delete(key);this.freshMetadata.set(key,value);while(this.freshMetadata.size>8192)this.freshMetadata.delete(this.freshMetadata.keys().next().value!);},
+      });
+    this.caches.set(key,cache);this.pruneCaches();return cache;
+  }
+  private pruneCaches() {
+    while(this.caches.size>128||this.cacheBytes>8_000_000) {
+      const key=this.caches.keys().next().value!;const cache=this.caches.get(key)!;
+      this.caches.delete(key);this.cacheBytes-=this.cacheSizes.get(key)||0;this.cacheSizes.delete(key);cache.releaseMemory();
+    }
+  }
+  private revisions() {return this.coordinator??=new BudgetedPublicRevision(this.ctx.storage,cost=>
+    this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserveAuxiliaryWrites(cost,'revision'),{
+      credits:()=>this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).revisionWriteCredits(),
+      reserve:(id,cost,completion)=>this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserveRevisionLifecycle(id,cost,completion),
+      complete:id=>this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).completeRevisionLifecycle(id),
+    });}
   async revision(): Promise<number> {
-    const current=this.revisions().snapshot([]);
+    const current=await this.revisions().run('snapshot',{},(revision,now,maintain)=>revision.snapshot([],now,maintain),true);
     if(current.anyPending) throw new Error('Public content mutation is in progress');
     return current.revision;
   }
-  async snapshot(keys:string[]) {return this.revisions().snapshot(keys);}
+  async snapshot(keys:string[]) {return this.revisions().run('snapshot',{},(revision,now,maintain)=>revision.snapshot(keys,now,maintain),true);}
   async invalidate(): Promise<void> {
-    this.revisions().invalidate();
+    await this.revisions().run('invalidate',{},revision=>revision.invalidate());
   }
-  async beginMutation(id:string):Promise<void> {this.revisions().begin(id);}
-  async finishMutation(id:string):Promise<void> {this.revisions().finish(id);}
-  async beginScoped(id:string,selectors:string[]):Promise<void> {this.revisions().beginScoped(id,selectors);}
-  async claimScoped(id:string,selectors:string[],existingOnly=false):Promise<boolean> {return this.revisions().claimScoped(id,selectors,Date.now(),existingOnly);}
-  async renewScoped(id:string):Promise<boolean> {return this.revisions().renewScoped(id);}
-  async finishScoped(id:string):Promise<void> {this.revisions().finishScoped(id);}
+  async beginMutation(id:string):Promise<void> {await this.revisions().run('begin',{id},(revision,now)=>revision.begin(id,now));}
+  async finishMutation(id:string):Promise<void> {await this.revisions().run('finish',{id},revision=>revision.finish(id));}
+  async beginScoped(id:string,selectors:string[]):Promise<void> {await this.revisions().run('beginScoped',{id,selectors},(revision,now)=>revision.beginScoped(id,selectors,now));}
+  async claimScoped(id:string,selectors:string[],existingOnly=false):Promise<boolean> {return this.revisions().run('claimScoped',{id,selectors,existingOnly},(revision,now)=>revision.claimScoped(id,selectors,now,existingOnly));}
+  async renewScoped(id:string):Promise<boolean> {return this.revisions().run('renewScoped',{id},(revision,now)=>revision.renewScoped(id,now));}
+  async finishScoped(id:string):Promise<void> {await this.revisions().run('finishScoped',{id},revision=>revision.finishScoped(id));}
   async seed(key: string,value: unknown,revision: number): Promise<{stored:boolean}> {
     validatePublicSeed(key,value);
     if(!Number.isSafeInteger(revision) || revision<1 || await this.env.PUBLIC_CACHE.getByName(REVISION).revision()!==revision) {
@@ -50,7 +75,7 @@ export class QamousPublicCache extends DurableObject<Env> {
     }
     const current=await this.env.PUBLIC_CACHE.getByName(REVISION).snapshot([key]);
     if(current.revision!==revision||current.anyPending) throw new Error('Public snapshot generation changed; export a new snapshot');
-    return {stored:await this.cache.prime(current.versions[0],{status:200,json:JSON.stringify(value)},FRESH_MS,STALE_MS)};
+    return {stored:await this.cacheFor(key).prime(current.versions[0],{status:200,json:JSON.stringify(value)},FRESH_MS,STALE_MS)};
   }
   async publish(key:string,value:unknown,status:200|404,revision:number):Promise<{stored:boolean}> {
     if(!validPublicCacheKey(key)||(status!==200&&status!==404)) throw new Error('Invalid public mutation payload');
@@ -58,12 +83,12 @@ export class QamousPublicCache extends DurableObject<Env> {
     const current=await this.env.PUBLIC_CACHE.getByName(REVISION).snapshot([key]);
     if(current.pending[0]||current.versions[0]!==revision) return {stored:false};
     const lifetime=status===404?5*60_000:undefined;
-    return {stored:await this.cache.prime(revision,{status,json:JSON.stringify(value)},lifetime??FRESH_MS,lifetime??STALE_MS,'essential')};
+    return {stored:await this.cacheFor(key).prime(revision,{status,json:JSON.stringify(value)},lifetime??FRESH_MS,lifetime??STALE_MS,'essential')};
   }
   async get(key: string,revision: number): Promise<PublicReply> {
     if(!validPublicCacheKey(key) || !Number.isSafeInteger(revision) || revision<1) return {ok:false,status:400,message:'Invalid public cache request'};
     try {
-      const result=await this.cache.get<PublicValue>(revision,FRESH_MS,STALE_MS,async()=>{
+      const result=await this.cacheFor(key).get<PublicValue>(revision,FRESH_MS,STALE_MS,async()=>{
         const db=guardD1(this.env.DB,this.env,{route:'cache:'+key.split(':')[0],tier:'public'});
         try {return {status:200,json:JSON.stringify(await resolvePublicData(db,key,this.env.PUBLIC_CARD_PAYLOADS==='true'))};}
         catch(error) {if(error instanceof ApiError && error.status===404) return {status:404,json:JSON.stringify(error.message)};throw error;}
@@ -91,7 +116,7 @@ export async function publicDataMany<T>(env: Pick<Env,'PUBLIC_CACHE'>,keys: stri
   catch {throw new ReadBudgetError('public_cache_coordination_unavailable',10);}
   if(before.pending.some(Boolean)) throw new ReadBudgetError('public_cache_mutation_pending',10);
   const values=await Promise.all(keys.map(async(key,index)=>{
-    const result=await env.PUBLIC_CACHE.getByName(PREFIX+key).get(key,before.versions[index]);
+    const result=await env.PUBLIC_CACHE.getByName(CONTENT).get(key,before.versions[index]);
     if(!result.ok) {
       if(result.budgetReason) throw new ReadBudgetError(result.budgetReason,result.retryAfter);
       throw new ApiError(result.status,result.message);
@@ -218,7 +243,7 @@ export function publicMutationBarrier(env:Pick<Env,'PUBLIC_CACHE'>,resolveScope:
           await Promise.all(entries.map(entry=>{
             const index=refreshKeys.indexOf(entry.key);
             return index<0||before.pending[index]?Promise.resolve():
-              env.PUBLIC_CACHE.getByName(PREFIX+entry.key).publish(entry.key,entry.value,entry.status,before.versions[index]);
+              env.PUBLIC_CACHE.getByName(CONTENT).publish(entry.key,entry.value,entry.status,before.versions[index]);
           }));
         }
       }

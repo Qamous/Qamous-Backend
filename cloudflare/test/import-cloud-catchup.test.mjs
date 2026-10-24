@@ -113,7 +113,7 @@ test('global read guard pauses import before SQL even when analytics report low 
 test('shared storage and read capacity pause imports automatically before an in-flight marker',async()=>{
   for(const mode of ['storage','reads','missing']) {
     const f=await fixture();const status=ledgerStatus();
-    if(mode==='storage'){status.usage.ledgerRows=48000;status.usage.tierLedgerRows.public=48000;}
+    if(mode==='storage'){status.usage.ledgerRows=READ_BUDGET_POLICY.ledgerPublicRows;status.usage.tierLedgerRows.public=READ_BUDGET_POLICY.ledgerPublicRows;}
     if(mode==='reads')status.usage.charged=3400000;
     f.env.READ_BUDGET.getByName=()=>({reconcile:async()=>mode==='missing'?{}:status});
     const result=await runCloudImport(f.env,'scheduled',f.deps);
@@ -127,17 +127,17 @@ test('shared storage and read capacity pause imports automatically before an in-
 test('reassessing an old hold still requires fresh storage capacity and persists the policy version on refusal',async()=>{
   const f=await fixture('14:00:00',0),key=f.key+'checkpoint.json';
   const checkpoint=JSON.parse(await (await f.objects.get(key)).text());checkpoint.reason='The dictionary is temporarily busy. Please try again shortly.';await f.objects.put(key,JSON.stringify(checkpoint));
-  const status=ledgerStatus();status.usage.ledgerRows=48000;status.usage.tierLedgerRows.public=48000;
+  const status=ledgerStatus();status.usage.ledgerRows=READ_BUDGET_POLICY.ledgerPublicRows;status.usage.tierLedgerRows.public=READ_BUDGET_POLICY.ledgerPublicRows;
   f.env.READ_BUDGET.getByName=()=>({reconcile:async()=>status});
   const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,0);assert.equal(result.ledgerPolicyVersion,IMPORT_LEDGER_POLICY_VERSION);assert.equal(result.nextAttemptAt,'2026-10-22T00:15:00.000Z');
   assert.equal(JSON.parse(await (await f.objects.get(key)).text()).inFlight,undefined);
 });
 
 test('tier-aware importer preflight preserves the essential reserve without treating its usage as import spend',()=>{
-  const status=ledgerStatus();status.usage.ledgerRows=53944;status.usage.tierLedgerRows={public:41952,import:2976,essential:9016,unknown:0};
+  const status=ledgerStatus();status.usage.ledgerRows=53944;status.usage.tierLedgerRows={public:45024,import:2976,essential:5944,unknown:0};
   const allowed=importLedgerCapacity(status,at('22:00:00'));
-  assert.equal(allowed.allowed,true);assert.equal(allowed.remainingLedgerRows,3072);
-  status.usage.tierLedgerRows.unknown=3072;status.usage.ledgerRows+=3072;
+  assert.equal(allowed.allowed,true);assert.equal(allowed.remainingLedgerRows,6000);
+  status.usage.tierLedgerRows.unknown=6000;status.usage.ledgerRows+=6000;
   assert.equal(importLedgerCapacity(status,at('22:00:00')).reason,'do_storage_budget');
 });
 

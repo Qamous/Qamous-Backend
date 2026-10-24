@@ -8,7 +8,7 @@ import { ApiError, normalize, type DictionaryRow } from './data';
 import { digest, type AppBindings } from './security';
 import { claimBudget, claimBudgetSet, chatbotBudgetClaims, chatbotLimitResponse, type ChatbotCaller } from './budget';
 import { attachProvenance, type SourceCredit } from './provenance';
-import { guardD1 } from './read-budget';
+import { guardD1,READ_BUDGET_OBJECT } from './read-budget';
 
 interface EmbedResult {data:number[][];}
 interface GenerateResult {response?:string; choices?:{message?:{content?:string}}[];}
@@ -33,11 +33,30 @@ function mailTransport(env:AppBindings) {
 
 export class QamousRuntime extends DurableObject<AppBindings> {
   private reactionTail:Promise<void>=Promise.resolve();
+  private rateStoreReady=false;
   constructor(ctx:DurableObjectState,env:AppBindings) {
     super(ctx,env);
-    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate_limits (scope TEXT PRIMARY KEY,used INTEGER NOT NULL,reset INTEGER NOT NULL)');
   }
-  allow(scope:string,limit:number,seconds:number) {
+  private async auxiliary(cost:number) {
+    try{return await this.env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reserveAuxiliaryWrites(cost,'runtime');}
+    catch{return false;}
+  }
+  private async rateStore() {
+    if(this.rateStoreReady)return true;
+    const exists=this.ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='rate_limits'").toArray().length;
+    // SQLite meters three schema rows when creating a text-primary-key table.
+    // New IP/object names cannot create an uncharged table before admission.
+    if(!exists){if(!await this.auxiliary(3))return false;this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate_limits (scope TEXT PRIMARY KEY,used INTEGER NOT NULL,reset INTEGER NOT NULL)');}
+    this.rateStoreReady=true;return true;
+  }
+  async allow(scope:string,limit:number,seconds:number) {
+    if(!Number.isSafeInteger(limit)||limit<1||!Number.isSafeInteger(seconds)||seconds<1)return false;
+    if(!await this.rateStore())return false;
+    const now=Math.floor(Date.now()/1000),current=this.ctx.storage.sql.exec('SELECT used,reset FROM rate_limits WHERE scope=?',scope).toArray()[0];
+    if(current&&Number(current.reset)>now&&Number(current.used)>=limit)return false;
+    // One text-key upsert and at most one text-key cleanup delete: four rows
+    // including indexes. The shared grant additionally accounts for itself.
+    if(!await this.auxiliary(4))return false;
     return claimBudget(this.ctx.storage.sql,scope,limit,seconds);
   }
   private daily(scope:string,limit:number) {
@@ -63,7 +82,7 @@ export class QamousRuntime extends DurableObject<AppBindings> {
     const preview=(this.env as Env & {LOCAL_IMPORT_PREVIEW?:string|boolean}).LOCAL_IMPORT_PREVIEW;
     if(preview===true||preview==='true') return {ok:false,reason:'unavailable'};
     if(!this.env.EMAIL_USERNAME||!this.env.EMAIL_PASSWORD) return {ok:false,reason:'unavailable'};
-    if(!this.daily('reset-emails',Math.min(30,Number(this.env.EMAIL_DAILY_LIMIT)||30))) return {ok:false,reason:'quota'};
+    if(!await this.daily('reset-emails',Math.min(30,Number(this.env.EMAIL_DAILY_LIMIT)||30))) return {ok:false,reason:'quota'};
     const mail=mailTransport(this.env);
     try {
       const url=`${this.env.APP_URL}/reset-password/${encodeURIComponent(resetToken)}`;
@@ -112,6 +131,11 @@ export class QamousRuntime extends DurableObject<AppBindings> {
     if(this.env.ENABLE_AI!=='true'||!this.env.AI) return {error:'AI is temporarily unavailable.',status:503};
     const day=new Date().toISOString().slice(0,10),globalLimit=Math.min(50,Number(this.env.AI_DAILY_LIMIT)||50);
     const claims=chatbotBudgetClaims(day,globalLimit,caller);
+    if(!await this.rateStore())return {error:'The free daily service allowance is temporarily unavailable. Please try again tomorrow.',status:429};
+    // Check local rejections without spending a global storage-write grant.
+    const now=Math.floor(Date.now()/1000);
+    for(const claim of claims){const row=this.ctx.storage.sql.exec('SELECT used,reset FROM rate_limits WHERE scope=?',claim.scope).toArray()[0];if(row&&Number(row.reset)>now&&Number(row.used)>=claim.limit)return chatbotLimitResponse(claim.scope,day,caller);}
+    if(!await this.auxiliary(claims.length*4))return {error:'The free daily service allowance is temporarily unavailable. Please try again tomorrow.',status:429};
     const blocked=this.ctx.storage.transactionSync(()=>claimBudgetSet(this.ctx.storage.sql,claims));
     if(blocked) return chatbotLimitResponse(blocked,day,caller);
     const tokens=normalize(query).match(/[\p{L}\p{N}]+/gu)||[];
@@ -150,7 +174,7 @@ export class QamousRuntime extends DurableObject<AppBindings> {
   }
   async syncEmbeddings(max=5) {
     const db=guardD1(this.env.DB,this.env,{route:'runtime:embeddings',tier:'import'});
-    if(this.env.ENABLE_AI!=='true'||!this.env.AI||!this.daily('embedding-batches',100)) return {updated:0};
+    if(this.env.ENABLE_AI!=='true'||!this.env.AI||!await this.daily('embedding-batches',100)) return {updated:0};
     // Imported vocabulary uses indexed lexical retrieval. Do not generate
     // hundreds of thousands of new vectors after a normal member contribution.
     const words=(await db.prepare("SELECT w.id,w.arabicWord,w.francoArabicWord,group_concat(d.definition,char(10)) AS definitions FROM users u JOIN words w ON w.userId=u.id LEFT JOIN public_definitions d ON d.wordId=w.id WHERE u.accountKind='member' GROUP BY w.id LIMIT 500").all<{id:number;arabicWord:string;francoArabicWord:string|null;definitions:string|null}>()).results;

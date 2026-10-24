@@ -29,7 +29,7 @@ export function claimBudget(storage:BudgetStorage,scope:string,limit:number,seco
     scope,now+seconds,now,now,now+seconds,now,limit,
   ).toArray();
   if(!rows.length) return false;
-  storage.exec('DELETE FROM rate_limits WHERE scope IN (SELECT scope FROM rate_limits WHERE reset<? LIMIT 128)',now-86400);
+  storage.exec('DELETE FROM rate_limits WHERE scope IN (SELECT scope FROM rate_limits WHERE reset<? LIMIT 1)',now-86400);
   return true;
 }
 

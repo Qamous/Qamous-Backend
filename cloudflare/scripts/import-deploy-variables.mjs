@@ -7,3 +7,8 @@ export function importDeploymentArgs(configPath,vars) {
 export function verifyImportDeploymentFlags(settings,vars) {
   if(!Array.isArray(settings?.bindings)||['PUBLIC_READ_ONLY','PUBLIC_CARD_PAYLOADS'].some(name=>settings.bindings.find(binding=>binding.name===name)?.text!==vars[name]))throw Error('Reviewed importer flags were not published');
 }
+
+export function pausedImportConfiguration(config) {
+  if(config?.name!=='qamous-import'||config?.main!=='src/import-host.mjs'||!['true','false'].includes(config.vars?.PUBLIC_READ_ONLY))throw Error('A reviewed importer configuration is required');
+  return {...config,vars:{...config.vars,PUBLIC_READ_ONLY:'true'},triggers:{...config.triggers,crons:[]}};
+}

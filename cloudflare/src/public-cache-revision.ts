@@ -3,6 +3,9 @@ import {validPublicCacheKey,publicItemIds} from './public-cache-keys.ts';
 interface SqlStore {exec<T extends Record<string,string|number|null>=Record<string,string|number|null>>(query:string,...values:(string|number|null)[]):{toArray():T[];one():T};}
 interface Store {sql:SqlStore;transactionSync<T>(callback:()=>T):T;}
 export interface PublicCacheSnapshot {revision:number;versions:number[];pending:boolean[];anyPending:boolean;}
+export type RevisionWriteMethod='snapshot'|'invalidate'|'begin'|'finish'|'beginScoped'|'claimScoped'|'renewScoped'|'finishScoped';
+export interface RevisionWriteInput {id?:string;selectors?:string[];existingOnly?:boolean;}
+export interface RevisionCompletion {key:string;id:string;scoped:boolean;cost:number;expires:number;}
 // D1 has a 30-second statement/batch timeout. Every admitted mutation renews
 // this two-minute barrier immediately before executing; a lost request cannot
 // leave old public data eligible when the barrier eventually recovers.
@@ -32,6 +35,17 @@ function selectorsFor(key:string):string[] {
 
 export class PublicCacheRevision {
   private store:Store;
+  static initializationCost(store:Store):number {
+    const tables=new Set(store.sql.exec<{name:string}>("SELECT name FROM sqlite_master WHERE type IN ('table','index') AND name GLOB 'public_cache_*'").toArray().map(row=>row.name));
+    const legacy=tables.has('public_cache_revision')?store.sql.exec<{revision:number}>('SELECT revision FROM public_cache_revision WHERE id=1').toArray()[0]?.revision:undefined;
+    const clock=tables.has('public_cache_clock')?store.sql.exec<{revision:number}>('SELECT revision FROM public_cache_clock WHERE id=1').toArray()[0]?.revision:undefined;
+    let schema=0;
+    for(const name of ['public_cache_revision','public_cache_mutations','public_cache_clock','public_cache_scope_versions','public_cache_scoped_mutations','public_cache_mutation_scopes'])if(!tables.has(name))schema+=3;
+    for(const [index,table] of [['public_cache_mutations_expiry','public_cache_mutations'],['public_cache_scoped_mutations_expiry','public_cache_scoped_mutations'],['public_cache_mutation_scopes_selector','public_cache_mutation_scopes']])if(!tables.has(index)) {
+      schema+=2+(tables.has(table)?Number(store.sql.exec<{n:number}>(`SELECT COUNT(*) AS n FROM ${table}`).one().n):0);
+    }
+    return schema+(legacy===undefined?1:0)+(clock===undefined?1:0)+(clock!==undefined&&clock<Number(legacy??1)?1:0);
+  }
   constructor(store:Store) {
     this.store=store;
     store.transactionSync(()=>{
@@ -60,14 +74,62 @@ export class PublicCacheRevision {
     for(const selector of selectors) this.store.sql.exec('INSERT INTO public_cache_scope_versions(selector,revision) VALUES(?,?) ON CONFLICT(selector) DO UPDATE SET revision=excluded.revision',selector,revision);
   }
   private legacyBump() {this.store.sql.exec('UPDATE public_cache_revision SET revision=? WHERE id=1',this.next());}
+  private expiryCost(now:number):number {
+    const sql=this.store.sql;
+    const legacy=sql.exec('SELECT id FROM public_cache_mutations WHERE expires<=? LIMIT 1',now).toArray().length;
+    const expired=sql.exec<{id:string}>('SELECT id FROM public_cache_scoped_mutations WHERE expires<=? LIMIT 1',now).toArray()[0];
+    const count=expired?Number(sql.exec<{n:number}>('SELECT COUNT(*) AS n FROM public_cache_mutation_scopes WHERE mutationId=?',expired.id).one().n):0;
+    return (legacy?5:0)+(expired?(count?3*count+4:3):0);
+  }
+  completionTickets():RevisionCompletion[] {
+    const sql=this.store.sql;
+    const legacy=sql.exec<{id:string;expires:number}>('SELECT id,expires FROM public_cache_mutations LIMIT 128').toArray().map(row=>({key:'legacy-'+row.id,id:row.id,scoped:false,cost:5,expires:Number(row.expires)}));
+    const scoped=sql.exec<{id:string;expires:number;n:number}>(`SELECT m.id,m.expires,COUNT(s.selector) AS n FROM public_cache_scoped_mutations m
+      LEFT JOIN public_cache_mutation_scopes s ON s.mutationId=m.id GROUP BY m.id LIMIT 128`).toArray().map(row=>({key:'scoped-'+row.id,id:row.id,scoped:true,cost:Number(row.n)?3*Number(row.n)+4:3,expires:Number(row.expires)}));
+    return [...legacy,...scoped];
+  }
+  futureCompletionCost(method:RevisionWriteMethod,input:RevisionWriteInput,now:number):number {
+    if(method==='begin')return 5;
+    if(method!=='beginScoped'&&method!=='claimScoped'&&method!=='renewScoped')return 0;
+    const own=this.store.sql.exec<{selector:string}>('SELECT selector FROM public_cache_mutation_scopes WHERE mutationId=?',input.id||'').toArray().map(row=>row.selector);
+    const selectors=new Set([...own,...(input.selectors||[])]);
+    // This bound includes a renamed word's two exact names and discovery
+    // selectors while keeping every prepaid completion below 512 SQL rows.
+    if(selectors.size>128)throw new Error('Too many budgeted public mutation selectors');
+    return selectors.size?3*selectors.size+4:0;
+  }
+  writeCost(method:RevisionWriteMethod,input:RevisionWriteInput={},now=Date.now()):number {
+    const sql=this.store.sql,id=input.id||'';
+    if(method==='snapshot')return this.expiryCost(now);
+    if(method==='invalidate')return 2;
+    if(!validIdentifier(id))throw new Error('Invalid public mutation identifier');
+    if(method==='finish')return sql.exec('SELECT id FROM public_cache_mutations WHERE id=?',id).toArray().length?5:0;
+    if(method==='begin')return 5+this.expiryCost(now);
+    const own=sql.exec<{selector:string}>('SELECT selector FROM public_cache_mutation_scopes WHERE mutationId=?',id).toArray().map(row=>row.selector);
+    if(method==='finishScoped')return own.length?3*own.length+4:0;
+    const ticket=sql.exec<{expires:number}>('SELECT expires FROM public_cache_scoped_mutations WHERE id=?',id).toArray()[0];
+    if(method==='renewScoped')return ticket&&Number(ticket.expires)>now&&!this.conflicts(id,new Set(own),now)?3:0;
+    const selectors=input.selectors;
+    if(!Array.isArray(selectors)||!selectors.length||selectors.length>MAX_SELECTORS||selectors.some(selector=>!validPublicCacheSelector(selector)))throw new Error('Invalid public mutation selectors');
+    const existing=ticket&&Number(ticket.expires)>now?own:[];
+    if(input.existingOnly&&!existing.length)return 0;
+    const merged=new Set([...existing,...selectors]);
+    if(merged.size>MAX_SELECTORS)throw new Error('Too many public mutation selectors');
+    if(method==='claimScoped'&&this.conflicts(id,merged,now))return 0;
+    // A scoped ticket has a PK and expiry index; a scope row has one secondary
+    // index. Count only missing scopes; version updates are one row each.
+    const missing=[...merged].filter(selector=>!existing.includes(selector)).length;
+    return this.expiryCost(now)+3+2*missing+merged.size+1;
+  }
   private expire(now:number) {
     const sql=this.store.sql;
     // Do not issue a DELETE or UPDATE for an ordinary read with no expirations.
-    if(sql.exec('SELECT id FROM public_cache_mutations WHERE expires<=? LIMIT 1',now).toArray().length) {
-      sql.exec('DELETE FROM public_cache_mutations WHERE expires<=?',now);
+    const legacy=sql.exec<{id:string}>('SELECT id FROM public_cache_mutations WHERE expires<=? LIMIT 1',now).toArray()[0];
+    if(legacy) {
+      sql.exec('DELETE FROM public_cache_mutations WHERE id=?',legacy.id);
       this.legacyBump();
     }
-    const expired=sql.exec<{id:string}>('SELECT id FROM public_cache_scoped_mutations WHERE expires<=?',now).toArray();
+    const expired=sql.exec<{id:string}>('SELECT id FROM public_cache_scoped_mutations WHERE expires<=? LIMIT 1',now).toArray();
     if(!expired.length) return;
     const scopes=new Set<string>();
     for(const {id} of expired) {
@@ -85,10 +147,10 @@ export class PublicCacheRevision {
         pending:Number(this.store.sql.exec('SELECT COUNT(*) AS n FROM public_cache_mutations').one().n)};
     });
   }
-  snapshot(keys:string[],now=Date.now()):PublicCacheSnapshot {
+  snapshot(keys:string[],now=Date.now(),maintain=true):PublicCacheSnapshot {
     if(!Array.isArray(keys)||keys.length>MAX_KEYS||keys.some(key=>typeof key!=='string'||!validPublicCacheKey(key))) throw new Error('Invalid public cache keys');
     return this.store.transactionSync(()=>{
-      this.expire(now);
+      if(maintain)this.expire(now);
       const sql=this.store.sql,legacy=Number(sql.exec('SELECT revision FROM public_cache_revision WHERE id=1').one().revision);
       const revision=Number(sql.exec('SELECT revision FROM public_cache_clock WHERE id=1').one().revision);
       const legacyPending=sql.exec('SELECT id FROM public_cache_mutations LIMIT 1').toArray().length>0;

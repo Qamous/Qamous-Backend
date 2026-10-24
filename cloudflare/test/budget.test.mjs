@@ -29,9 +29,9 @@ test('accepted cleanup has a fixed row bound even after long inactivity',()=>{
   const insert=sql.db.prepare('INSERT INTO rate_limits VALUES(?,?,?)');
   for(let n=0;n<300;n++)insert.run('expired:'+n,1,1);
   assert.equal(claimBudget(sql,'active',1,60,100_000),true);
-  assert.equal(sql.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE scope LIKE ?').get('expired:%').n,172);
+  assert.equal(sql.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE scope LIKE ?').get('expired:%').n,299);
   assert.equal(claimBudget(sql,'active',1,60,100_001),false);
-  assert.equal(sql.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE scope LIKE ?').get('expired:%').n,172);
+  assert.equal(sql.db.prepare('SELECT COUNT(*) AS n FROM rate_limits WHERE scope LIKE ?').get('expired:%').n,299);
   sql.db.close();
 });
 test('AI request 51 and email 31 stop; distinct budgets and day scopes remain independent',()=>{

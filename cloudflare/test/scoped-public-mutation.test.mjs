@@ -13,7 +13,7 @@ const bundled=await build({stdin:{contents:`
   export {QamousPublicCache,publicData,publicDataMany,publicMutationBarrier,preparePublicMutation} from './src/public-cache.ts';
   export {ReadBudgetLedger} from './src/read-budget-ledger.ts';
   export {guardD1} from './src/read-budget.ts';
-  export {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION} from './src/public-cache-keys.ts';
+  export {PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION,PUBLIC_CACHE_CONTENT_V2} from './src/public-cache-keys.ts';
 `,resolveDir:fileURLToPath(new URL('..',import.meta.url)),loader:'ts'},bundle:true,write:false,
   format:'esm',platform:'node',target:'es2022',plugins:[{
     name:'local-durable-object-base',
@@ -24,7 +24,7 @@ const bundled=await build({stdin:{contents:`
     },
   }]});
 const {QamousPublicCache,publicData,publicDataMany,publicMutationBarrier,preparePublicMutation,ReadBudgetLedger,guardD1,
-  PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'));
+  PUBLIC_CACHE_PREFIX,PUBLIC_CACHE_REVISION,PUBLIC_CACHE_CONTENT_V2}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'));
 
 const day='2026-10-22',now=Date.parse(day+'T12:00:00Z');
 const migrations=await Promise.all((await readdir(new URL('../migrations/',import.meta.url)))
@@ -54,7 +54,7 @@ function fixture(t) {
       (1,1,1,'EG','Original meaning A',0),(2,1,1,'EG','معنى عربي',1),
       (201,2,1,'EG','Unrelated meaning B',0);
     INSERT INTO posts VALUES ('post-a','1','Original post','Original post content',100,0);`);
-  const ledger=new ReadBudgetLedger(ledgerStore,{day,rows:0,cacheDay:day,cacheRows:0},()=>{});
+  const ledger=new ReadBudgetLedger(ledgerStore,{day,rows:0,cacheDay:day,cacheRows:0,auxiliaryDay:day,auxiliaryRows:0},()=>{});
   let executions=0,failNextWrite=false,afterReadBatch,afterSettledBatch,unknownSql;
   const raw={prepare(query) {
     const create=(args=[])=>({bind(...next) {return create(next);},async all() {
@@ -75,6 +75,10 @@ function fixture(t) {
   const env={DB:raw,READ_BUDGET:{getByName:()=>({
     reserve:async input=>ledger.reserve(input,now),
     reservePublicCacheWrites:async(cost,tier)=>ledger.reservePublicCacheWrites(cost,tier,now),
+    reserveAuxiliaryWrites:async(cost,kind)=>ledger.reserveAuxiliaryWrites(cost,kind,now),
+    revisionWriteCredits:async()=>ledger.revisionWriteCredits(),
+    reserveRevisionLifecycle:async(id,cost,completion)=>ledger.reserveRevisionLifecycle(id,cost,completion,now),
+    completeRevisionLifecycle:async id=>ledger.completeRevisionLifecycle(id,now),
     settle:async(id,actual,writes)=>{const result=ledger.settle(id,actual,writes,now);
       if(afterSettledBatch){const hook=afterSettledBatch;afterSettledBatch=undefined;await hook();}return result;},
   })},PUBLIC_CACHE:{getByName(name) {
@@ -95,7 +99,7 @@ function fixture(t) {
     commitUnknownWrite() {assert.ok(unknownSql);const commit=unknownSql;unknownSql=undefined;commit();},
     afterReadBatch(hook) {afterReadBatch=hook;},
     expireTickets() {stores.get(PUBLIC_CACHE_REVISION).db.exec('UPDATE public_cache_scoped_mutations SET expires=0');},
-    restart(key) {objects.delete(PUBLIC_CACHE_PREFIX+key);}};
+    restart(key) {objects.delete(PUBLIC_CACHE_CONTENT_V2);}};
 }
 
 async function warm(f,keys=['word:1','word:2']) {
