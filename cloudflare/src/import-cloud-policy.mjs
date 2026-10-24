@@ -6,6 +6,7 @@ export const IMPORT_LIMITS = Object.freeze({dailyImportWrites:75000, accountWrit
 // Full replay exposed occasional FTS maintenance bursts above the ordinary
 // 5k packet margin. Retain the 10k in-flight allowance in both quota windows.
 export const CLOUD_PACKET_RESERVE = 10000;
+export const IMPORT_LEDGER_POLICY_VERSION='tiered-storage-v1';
 export const LATE_CATCHUP = Object.freeze({startHourUTC:22, endMinuteUTC:23*60+55, targetWrites:95000});
 export function importPolicyAt(now=new Date()) {
   const minute=now.getUTCHours()*60+now.getUTCMinutes();
@@ -26,7 +27,12 @@ export function nextQuotaOpportunity(now=new Date()) {
 // network/auth retries, integrity holds, final-audit waits or uncertain writes.
 export function quotaRetryAt(state,now=new Date()) {
   const saved=state.nextAttemptAt,last=Date.parse(state.lastAttemptAt);
-  if(state.status!=='waiting_for_free_quota'||state.reason!=='Shared Free quota reserve reached'||state.inFlight||!Number.isFinite(Date.parse(saved))||!Number.isFinite(last)||last>now.getTime())return saved;
+  if(state.status!=='waiting_for_free_quota'||state.halted||state.inFlight||!Number.isFinite(Date.parse(saved))||!Number.isFinite(last)||last>now.getTime())return saved;
+  // Older releases stored only this display message, not a reason code. Wake
+  // once after the accounting-policy upgrade to recheck REAL capacity before
+  // any SQL. No counters, uncertain packets or integrity halts are reset.
+  if(state.reason==='The dictionary is temporarily busy. Please try again shortly.'&&state.ledgerPolicyVersion!==IMPORT_LEDGER_POLICY_VERSION)return now.toISOString();
+  if(state.reason!=='Shared Free quota reserve reached')return saved;
   const candidate=nextQuotaOpportunity(new Date(last));
   return Date.parse(candidate)<Date.parse(saved)?candidate:saved;
 }
@@ -41,6 +47,21 @@ export function importQuota(state, usage, now = new Date()) {
   const settling=now.getUTCHours()===0&&now.getUTCMinutes()<15;
   const approachingReset=now.getUTCHours()===23&&now.getUTCMinutes()>=55;
   return {allowed:!settling&&!approachingReset&&remaining>=IMPORT_LIMITS.packetReserve&&effectiveReads<IMPORT_LIMITS.dailyReads,day,budget,effectiveWrites,effectiveReads,remaining,policy,nextAttemptAt:settling?new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate(),0,15)).toISOString():nextQuotaOpportunity(now)};
+}
+export function importLedgerCapacity(status,now=new Date(),operations=3) {
+  const day=now.toISOString().slice(0,10),usage=status?.usage,policy=status?.policy,tiers=usage?.tierLedgerRows;
+  if(status?.day!==day||status.initialized!==true||!usage||!tiers||!policy
+    ||![usage.charged,usage.ledgerRows,tiers.public,tiers.import,tiers.essential,tiers.unknown,policy.ledgerRowsPerOperation,policy.ledgerTotalRows,policy.ledgerPublicRows,policy.ledgerImportRows,policy.importStopRows].every(n=>Number.isSafeInteger(n)&&n>=0))return {allowed:false,reason:'coordinator_unavailable',retryAfter:60};
+  const retryAfter=Math.max(60,Math.ceil((Date.parse(day+'T00:00:00Z')+86400000-now.getTime())/1000));
+  if(usage.tripped)return {allowed:false,reason:'cost_circuit_open',retryAfter};
+  const remainingLedgerRows=Math.min(policy.ledgerTotalRows-usage.ledgerRows,policy.ledgerPublicRows-tiers.public-tiers.import-tiers.unknown,policy.ledgerImportRows-tiers.import-tiers.unknown);
+  const requiredLedgerRows=operations*policy.ledgerRowsPerOperation;
+  if(remainingLedgerRows<requiredLedgerRows)return {allowed:false,reason:'do_storage_budget',retryAfter,remainingLedgerRows,requiredLedgerRows};
+  // The batch contract remains 200k until a full staged-packet rehearsal proves
+  // a tighter bound. Status is only preflight; synchronous admission is final.
+  const remainingReadRows=policy.importStopRows-usage.charged;
+  if(remainingReadRows<200000)return {allowed:false,reason:'import_paused',retryAfter,remainingReadRows};
+  return {allowed:true,remainingLedgerRows,requiredLedgerRows,remainingReadRows};
 }
 export function validateImportPacket(packet,index) {
   if(packet.index!==index||!Array.isArray(packet.statements)||!packet.statements.length||packet.statements.length>IMPORT_LIMITS.statements) throw Error('Invalid packet bounds');
@@ -60,9 +81,14 @@ export function recoverCloudFlight(state,now = new Date()) {
   // original UTC day; replay only INSERT OR IGNORE, never points/vote mutations.
   const reserve=flight.reservedWrites??IMPORT_LIMITS.packetReserve;
   if(!Number.isSafeInteger(reserve)||reserve<IMPORT_LIMITS.packetReserve||reserve>CLOUD_PACKET_RESERVE)throw Error('Unrecognized interrupted write reservation');
-  state.days[flight.startedAt.slice(0,10)].rowsWritten+=reserve;
+  // A successful D1 batch is durably charged before identity/audit work. Its
+  // receipt and day totals are persisted together; retry must not charge it a
+  // second time merely because later verification lost its response.
+  const measured=flight.measurement;
+  if(measured&&(![measured.rowsWritten,measured.rowsRead,measured.databaseBytes].every(n=>Number.isSafeInteger(n)&&n>=0)||measured.charged!==true||state.days[flight.startedAt.slice(0,10)].rowsWritten<measured.rowsWritten||state.days[flight.startedAt.slice(0,10)].rowsRead<measured.rowsRead))throw Error('Unrecognized measured cloud packet');
+  if(!measured)state.days[flight.startedAt.slice(0,10)].rowsWritten+=reserve;
   state.recoveredPackets=(state.recoveredPackets||0)+1;
-  state.lastRecovery={...flight,reconciledAt:now.toISOString(),reservedWrites:reserve};
+  state.lastRecovery={...flight,reconciledAt:now.toISOString(),reservedWrites:reserve,additionalWriteCharge:measured?0:reserve};
   delete state.inFlight;return true;
 }
 export function cloudHandoffDecision(config,status) {

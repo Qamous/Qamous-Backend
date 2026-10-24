@@ -7,6 +7,6 @@ export function validateLiveImportState(settings,schedules) {
 }
 
 export function validateImportApiReady(settings) {
-  if(settings?.bindings?.find(binding=>binding.name==='PUBLIC_READ_ONLY')?.text!=='false')
+  if(settings?.bindings?.find(binding=>binding.name==='PUBLIC_READ_ONLY')?.text!=='false'||settings?.bindings?.find(binding=>binding.name==='PUBLIC_WRITES_PAUSED')?.text!=='false')
     throw Error('Deployment refused: qamous-api must be explicitly unpaused before ingestion resumes');
 }

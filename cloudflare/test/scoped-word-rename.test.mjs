@@ -55,7 +55,8 @@ test('overlapping renames produce one conflict and preserve the winning canonica
     durableObjects:{RUNTIME:{className:'QamousRuntime',useSQLite:true},READ_BUDGET:{className:'QamousReadBudget',useSQLite:true},PUBLIC_CACHE:{className:'QamousPublicCache',useSQLite:true}},
     bindings:{SESS_SECRET:'rename-test-session-secret',PASSWORD_PEPPER:'rename-test-password-pepper',RESET_SECRET:'rename-test-reset-secret',
       ALLOWED_ORIGINS:'https://qamous.org',APP_URL:'https://qamous.org',ENABLE_AI:'false',
-      READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0'},
+      READ_BUDGET_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),READ_BUDGET_BOOTSTRAP_ROWS:'0',
+      PUBLIC_CACHE_WRITE_BOOTSTRAP_DAY:new Date().toISOString().slice(0,10),PUBLIC_CACHE_WRITE_BOOTSTRAP_ROWS:'0'},
     outboundService:()=>{throw new Error('Rename race tests must not contact external services');}}));
   t.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB');

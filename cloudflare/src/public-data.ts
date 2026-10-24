@@ -40,7 +40,29 @@ export function exploreCacheKey(params: URLSearchParams) {
   return 'explore:'+clean.toString();
 }
 
-export async function publicWord(db: D1Database,id: number) {
+export async function publicWord(db: D1Database,id: number,prepared=false) {
+  if(prepared) {
+    const values=await db.prepare(`WITH canonical AS (
+      SELECT input.canonicalArabic,MIN(variant.id) AS canonicalWordId FROM words input
+      JOIN words variant ON variant.canonicalArabic=input.canonicalArabic AND variant.reportCount<5
+      WHERE input.id=?
+    ) SELECT d.id,canonical.canonicalWordId,p.payload FROM canonical
+      JOIN words w ON w.canonicalArabic=canonical.canonicalArabic
+      JOIN public_definitions d ON d.wordId=w.id
+      LEFT JOIN public_card_payloads p ON p.definitionId=d.id
+      WHERE d.reportCount+w.reportCount<5 ORDER BY d.id`).bind(id).all<{id:number;canonicalWordId:number;payload:string|null}>();
+    if(!values.results.length)throw new ApiError(404,'Word not found');
+    if(values.results.every(row=>typeof row.payload==='string'))return values.results.map(value=>{
+      const card=JSON.parse(value.payload!) as Row;
+      validatePublicSeed('items:'+value.id,[card]);
+      if(!card||typeof card!=='object'||Number(card.definitionId??card.id)!==value.id)throw new ApiError(503,'Invalid prepared public word');
+      // Feed cards are flat and carry a sorting-only difference. Word pages
+      // retain their established nested word object and every visible sense.
+      const {likeDislikeDifference,...row}=card;
+      return {...withWord({...row,definitionId:value.id,canonicalWordId:value.canonicalWordId,isLiked:false,isDisliked:false,isReported:false}),
+        arabicWord:card.arabicWord,francoArabicWord:card.francoArabicWord};
+    });
+  }
   const canonical=await db.prepare(`SELECT MIN(variant.id) AS id FROM words input
     JOIN words variant ON variant.canonicalArabic=input.canonicalArabic AND variant.reportCount<5
     WHERE input.id=?`).bind(id).first<{id:number|null}>();
@@ -131,7 +153,7 @@ export async function resolvePublicData(db: D1Database,key: string,preparedCards
   if(key==='sources') return (await db.prepare('SELECT id,name,sourceUrl,license,licenseUrl,rightsStatus,credit,notice,attributionRequired,releaseHash FROM import_sources ORDER BY name').all<Row>()).results.map(row=>({...row,licenseUrl:licenseLink(String(row.license),String(row.licenseUrl))}));
   if(key==='countries') return (await db.prepare('SELECT * FROM countries ORDER BY countryName').all()).results;
   if(/^feed:[01]$/.test(key)) return (await db.prepare(preparedCards?preparedFeedCandidatesSql:feedCandidatesSql).bind(Number(key.slice(-1))).all()).results;
-  if(/^word:[1-9]\d*$/.test(key)) return publicWord(db,positiveId(key.slice(5)));
+  if(/^word:[1-9]\d*$/.test(key)) return publicWord(db,positiveId(key.slice(5)),preparedCards);
   if(key.startsWith('items:')) {
     const params=new URLSearchParams({ids:key.slice(6)});
     if(publicItemsKey(params)!==key) throw new ApiError(400,'Invalid public item resource');

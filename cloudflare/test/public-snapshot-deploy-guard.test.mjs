@@ -28,6 +28,16 @@ test('resuming writes requires verified live settings with snapshot binding remo
   }), /still serves a frozen public snapshot/);
 });
 
+test('only the API can restore reads while every mutation remains paused', async () => {
+  const bridge={name:'qamous-api',vars:{PUBLIC_READ_ONLY:'false',PUBLIC_WRITES_PAUSED:'true',PUBLIC_CARD_PAYLOADS:'true'}};
+  assert.deepEqual(await verifyPublicSnapshotUnpause(bridge,{readSettings:()=>assert.fail('writers are still closed')}),{paused:false,writesPaused:true});
+  for(const config of [
+    {...bridge,name:'qamous-import'},
+    {...bridge,vars:{...bridge.vars,PUBLIC_WRITES_PAUSED:'false'}},
+    {...bridge,vars:{...bridge.vars,PUBLIC_CARD_PAYLOADS:'false'}},
+  ])await assert.rejects(verifyPublicSnapshotUnpause(config,{readSettings:async()=>settings([{name:'PUBLIC_SNAPSHOT_ID',text:'active'}])}),/still serves a frozen/);
+});
+
 test('missing pause, malformed settings, provider failures, and transport failures refuse unpause', async () => {
   for (const config of [{}, { vars: {} }, { vars: { PUBLIC_READ_ONLY: false } }]) {
     await assert.rejects(verifyPublicSnapshotUnpause(config, { readSettings: async () => assert.fail('not called') }), /explicit/);

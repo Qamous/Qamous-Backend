@@ -49,6 +49,12 @@ export async function verifyPublicSnapshotUnpause(config, { readSettings = readL
   const pause = config?.vars?.PUBLIC_READ_ONLY;
   if (pause === 'true') return { paused: true };
   if (pause !== 'false') throw new Error('Deployment refused: explicit public snapshot pause setting is required');
+  // A read-only API is the bridge out of static recovery: publish fresh public
+  // reads, withdraw the frontend snapshot, then enable mutations. This exception
+  // is unavailable to the importer, which must stay paused during the bridge.
+  if(config.name==='qamous-api' && config.vars.PUBLIC_WRITES_PAUSED==='true' && config.vars.PUBLIC_CARD_PAYLOADS==='true') {
+    return {paused:false,writesPaused:true};
+  }
   validatePublicSnapshotSettings(await readSettings());
   return { paused: false, snapshotActive: false };
 }

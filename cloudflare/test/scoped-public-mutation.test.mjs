@@ -54,7 +54,7 @@ function fixture(t) {
       (1,1,1,'EG','Original meaning A',0),(2,1,1,'EG','معنى عربي',1),
       (201,2,1,'EG','Unrelated meaning B',0);
     INSERT INTO posts VALUES ('post-a','1','Original post','Original post content',100,0);`);
-  const ledger=new ReadBudgetLedger(ledgerStore,{day,rows:0},()=>{});
+  const ledger=new ReadBudgetLedger(ledgerStore,{day,rows:0,cacheDay:day,cacheRows:0},()=>{});
   let executions=0,failNextWrite=false,afterReadBatch,afterSettledBatch,unknownSql;
   const raw={prepare(query) {
     const create=(args=[])=>({bind(...next) {return create(next);},async all() {
@@ -74,6 +74,7 @@ function fixture(t) {
   }};
   const env={DB:raw,READ_BUDGET:{getByName:()=>({
     reserve:async input=>ledger.reserve(input,now),
+    reservePublicCacheWrites:async(cost,tier)=>ledger.reservePublicCacheWrites(cost,tier,now),
     settle:async(id,actual,writes)=>{const result=ledger.settle(id,actual,writes,now);
       if(afterSettledBatch){const hook=afterSettledBatch;afterSettledBatch=undefined;await hook();}return result;},
   })},PUBLIC_CACHE:{getByName(name) {

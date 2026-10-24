@@ -9,29 +9,32 @@ export const READ_BUDGET_POLICY=Object.freeze({
   ledgerPublicOperations:6000,ledgerTotalOperations:8000,ledgerImportOperations:4000,
   ledgerRowsPerOperation:8,ledgerWarningOperations:4000,
   ledgerPublicRows:48_000,ledgerTotalRows:64_000,ledgerImportRows:32_000,
+  cachePublicRows:16_000,cacheTotalRows:20_000,
 });
 type SqlValue=string|number|null;
 interface SqlStore {exec<T extends Record<string,SqlValue>=Record<string,SqlValue>>(query:string,...values:SqlValue[]):{toArray():T[];one():T};}
 interface Store {sql:SqlStore;transactionSync<T>(callback:()=>T):T;}
 interface Lease extends Record<string,SqlValue> {id:string;day:string;tier:ReadTier;route:string;reserved:number;started:number;minute:number;status:string;actual:number|null;}
 interface Route {route:string;tier:ReadTier;charged:number;measured:number;queries:number;writes:number;denied:number;unknown:number;}
-interface State {day:string;charged:number;measured:number;baseline:number;denied:number;tripped:string|null;alerted:number;operations:number;ledgerRows:number;unresolved:number;minutes:Record<string,{charged:number;essential:number}>;routes:Record<string,Route>;active:Record<string,{tier:ReadTier;started:number}>;cleanupCursor:string;}
+interface TierRows {public:number;import:number;essential:number;unknown:number;}
+interface State {day:string;charged:number;measured:number;baseline:number;denied:number;tripped:string|null;alerted:number;operations:number;ledgerRows:number;tierLedgerRows?:TierRows;unresolved:number;minutes:Record<string,{charged:number;essential:number}>;routes:Record<string,Route>;active:Record<string,{tier:ReadTier;started:number}>;cleanupCursor:string;}
 export interface Reservation {id:string;route:string;tier:ReadTier;rows:number;}
 export type Admission={allowed:true;id:string;day:string;reserved:number}|{allowed:false;reason:string;retryAfter:number};
 const dayAt=(now:number)=>new Date(now).toISOString().slice(0,10);
 const validInteger=(n:unknown):n is number=>Number.isSafeInteger(n)&&Number(n)>=0;
 const safeRoute=(route:string)=>route.replace(/[^a-zA-Z0-9_:/.-]/g,'_').slice(0,96);
-const empty=(day:string,rows:number):State=>({day,charged:rows,measured:0,baseline:rows,denied:0,tripped:null,alerted:0,operations:0,ledgerRows:0,unresolved:0,minutes:{},routes:{},active:{},cleanupCursor:''});
+const empty=(day:string,rows:number):State=>({day,charged:rows,measured:0,baseline:rows,denied:0,tripped:null,alerted:0,operations:0,ledgerRows:0,tierLedgerRows:{public:0,import:0,essential:0,unknown:0},unresolved:0,minutes:{},routes:{},active:{},cleanupCursor:''});
 
 export class ReadBudgetLedger {
   private store:Store;private emit:(event:Record<string,unknown>)=>void;
   private hasLegacyLeases=false;
   private deniedDay='';private deniedCount=0;private denialEvents=new Map<string,number>();
-  constructor(store:Store,bootstrap:{day?:string;rows?:number},emit:(event:Record<string,unknown>)=>void=event=>console.log(JSON.stringify(event))) {
+  constructor(store:Store,bootstrap:{day?:string;rows?:number;cacheDay?:string;cacheRows?:number},emit:(event:Record<string,unknown>)=>void=event=>console.log(JSON.stringify(event))) {
     this.store=store;this.emit=emit;
     const sql=store.sql;
     sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_days(day TEXT PRIMARY KEY,state TEXT NOT NULL) WITHOUT ROWID');
     sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER) WITHOUT ROWID');
+    sql.exec('CREATE TABLE IF NOT EXISTS public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL) WITHOUT ROWID');
     // Legacy tables remain read-only evidence. Copy each existing day exactly
     // once and carry all previously spent lifecycle allocations at the OLD
     // 32-row rate. Deploying this change cannot reset today's storage budget.
@@ -55,10 +58,50 @@ export class ReadBudgetLedger {
         // At most six leases can remain concurrent; use the newest six to
         // preserve that restriction even across a deployment/eviction.
         for(const lease of pending.filter(l=>l.status==='pending').sort((a,b)=>b.started-a.started).slice(0,READ_BUDGET_POLICY.maxConcurrent))state.active[lease.id]={tier:lease.tier,started:lease.started};
-        this.save(state);
+        delete state.tierLedgerRows;state.tierLedgerRows=this.classifyTierRows(state);this.save(state);
+      }
+    });
+    // Upgrade already compact days exactly once. Classify saved reservations;
+    // never reset or reduce the durable global allocation during deployment.
+    store.transactionSync(()=>{
+      for(const row of sql.exec('SELECT state FROM read_budget_compact_days').toArray()) {
+        const state=JSON.parse(String(row.state)) as State;
+        if(!state.tierLedgerRows){state.tierLedgerRows=this.classifyTierRows(state);this.save(state);}
       }
     });
     if(bootstrap.day&&/^\d{4}-\d{2}-\d{2}$/.test(bootstrap.day)&&validInteger(bootstrap.rows)&&!this.get(bootstrap.day))this.save(empty(bootstrap.day,bootstrap.rows));
+    if(bootstrap.cacheDay&&/^\d{4}-\d{2}-\d{2}$/.test(bootstrap.cacheDay)&&validInteger(bootstrap.cacheRows))sql.exec('INSERT OR IGNORE INTO public_cache_write_days(day,charged) VALUES(?,?)',bootstrap.cacheDay,bootstrap.cacheRows+1);
+  }
+  reservePublicCacheWrites(cost:number,tier:'public'|'essential',now=Date.now()):boolean {
+    if(!validInteger(cost)||cost<1||cost>512||!['public','essential'].includes(tier))return false;
+    return this.store.transactionSync(()=>{
+      const sql=this.store.sql,day=dayAt(now),current=sql.exec('SELECT charged FROM public_cache_write_days WHERE day=?',day).toArray()[0];
+      // This new pool needs an explicit initial-day baseline. It cannot assume
+      // earlier cache writers used zero rows simply because code was deployed.
+      if(!current&&!sql.exec('SELECT day FROM public_cache_write_days WHERE day<? ORDER BY day DESC LIMIT 1',day).toArray().length)return false;
+      const charged=Number(current?.charged||0),ceiling=tier==='essential'?READ_BUDGET_POLICY.cacheTotalRows:READ_BUDGET_POLICY.cachePublicRows,allocation=cost+1;
+      if(charged+allocation>ceiling)return false;
+      sql.exec('INSERT INTO public_cache_write_days(day,charged) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET charged=excluded.charged',day,charged+allocation);
+      return true;
+    });
+  }
+  private classifyTierRows(state:State):TierRows {
+    const counts={public:0,import:0,essential:0},legacy={public:0,import:0,essential:0};
+    for(const route of Object.values(state.routes))counts[route.tier]+=route.queries;
+    if(this.hasLegacyLeases)for(const row of this.store.sql.exec('SELECT tier,SUM(queries) AS n FROM read_budget_routes WHERE day=? GROUP BY tier',state.day).toArray()) {
+      if(row.tier==='public'||row.tier==='import'||row.tier==='essential')legacy[row.tier]=Number(row.n);
+    }
+    const result:TierRows={public:0,import:0,essential:0,unknown:0};
+    for(const tier of ['public','import','essential'] as const) {
+      const prior=Math.min(counts[tier],legacy[tier]);
+      result[tier]=prior*32+(counts[tier]-prior)*READ_BUDGET_POLICY.ledgerRowsPerOperation;
+    }
+    const classified=result.public+result.import+result.essential;
+    // Late lifecycle units are not represented in route query counts. Charge
+    // unclassified legacy work against both nonessential and import headroom.
+    // Inconsistent historical stats fail closed without reducing total spend.
+    if(classified>state.ledgerRows)return {public:0,import:0,essential:0,unknown:state.ledgerRows};
+    result.unknown=state.ledgerRows-classified;return result;
   }
   private get(day:string):State|null {const row=this.store.sql.exec('SELECT state FROM read_budget_compact_days WHERE day=?',day).toArray()[0];return row?JSON.parse(String(row.state)):null;}
   private save(state:State) {
@@ -117,8 +160,10 @@ export class ReadBudgetLedger {
       const midnight=Date.parse(day+'T00:00:00Z')+86400_000,retry=Math.max(60,Math.ceil((midnight-now)/1000));
       if(now>=midnight-READ_BUDGET_POLICY.resetQuietMs)return deny('utc_rollover',Math.max(1,Math.ceil((midnight-now)/1000)));
       if(state.tripped)return deny('cost_circuit_open',retry);
-      const storageCeiling=input.tier==='essential'?READ_BUDGET_POLICY.ledgerTotalRows:input.tier==='import'?READ_BUDGET_POLICY.ledgerImportRows:READ_BUDGET_POLICY.ledgerPublicRows;
-      if(state.ledgerRows+READ_BUDGET_POLICY.ledgerRowsPerOperation>storageCeiling)return deny('do_storage_budget',retry);
+      const allocation=READ_BUDGET_POLICY.ledgerRowsPerOperation,tiers=state.tierLedgerRows!;
+      if(state.ledgerRows+allocation>READ_BUDGET_POLICY.ledgerTotalRows
+        ||input.tier!=='essential'&&tiers.public+tiers.import+tiers.unknown+allocation>READ_BUDGET_POLICY.ledgerPublicRows
+        ||input.tier==='import'&&tiers.import+tiers.unknown+allocation>READ_BUDGET_POLICY.ledgerImportRows)return deny('do_storage_budget',retry);
       const ceiling=input.tier==='essential'?READ_BUDGET_POLICY.totalRows:input.tier==='import'?READ_BUDGET_POLICY.importStopRows:READ_BUDGET_POLICY.publicRows;
       if(state.charged+input.rows>ceiling)return deny(input.tier==='import'?'import_paused':'daily_budget',retry);
       for(const [id,active] of Object.entries(state.active))if(active.started<now-READ_BUDGET_POLICY.leaseMs)delete state.active[id];
@@ -127,7 +172,7 @@ export class ReadBudgetLedger {
       if(input.tier==='import'&&active.filter(a=>a.tier==='import').length>=READ_BUDGET_POLICY.importConcurrent)return deny('import_concurrency');
       const window=state.minutes[minute]||{charged:0,essential:0},burn=READ_BUDGET_POLICY.minuteRows+(input.tier==='essential'?READ_BUDGET_POLICY.essentialMinuteRows:0);
       if(window.charged+input.rows>burn)return deny('burn_rate',60-now/1000%60|0||1);
-      state.charged+=input.rows;state.unresolved+=input.rows;state.operations++;state.ledgerRows+=READ_BUDGET_POLICY.ledgerRowsPerOperation;
+      state.charged+=input.rows;state.unresolved+=input.rows;state.operations++;state.ledgerRows+=allocation;tiers[input.tier]+=allocation;
       state.minutes[minute]={charged:window.charged+input.rows,essential:window.essential+(input.tier==='essential'?input.rows:0)};
       state.active[input.id]={tier:input.tier,started:now};
       const entry=this.route(state,route,input.tier);entry.charged+=input.rows;entry.queries++;
@@ -146,7 +191,7 @@ export class ReadBudgetLedger {
       if(lease.day!==dayAt(now)) {
         current=this.current(now,false);
         if(!current||current.ledgerRows+READ_BUDGET_POLICY.ledgerRowsPerOperation>READ_BUDGET_POLICY.ledgerTotalRows){this.deny(dayAt(now),lease.route,lease.tier,'do_storage_budget',60,current);return {settled:false,charged:lease.reserved,reason:'do_storage_budget'};}
-        current.ledgerRows+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.operations++;
+        current.ledgerRows+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.tierLedgerRows!.essential+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.operations++;
       }
       const entry=this.route(state,lease.route,lease.tier);delete state.active[id];
       if(unknown){lease.status='unknown';entry.unknown++;}
@@ -168,6 +213,7 @@ export class ReadBudgetLedger {
   }
   status(now=Date.now()) {
     const state=this.current(now,false),{minutes:_minutes,routes:_routes,active:_active,cleanupCursor:_cursor,...usage}=state||{};
-    return {day:dayAt(now),initialized:!!state,policy:READ_BUDGET_POLICY,usage:state?{...usage,denied:state.denied+(this.deniedDay===state.day?this.deniedCount:0)}:null,denialAccounting:'Current-process counts plus legacy persisted counts; bounded events are emitted without storage writes.',active:state?Object.values(state.active).filter(a=>a.started>=now-READ_BUDGET_POLICY.leaseMs).length:0,routes:state?Object.values(state.routes).sort((a,b)=>b.charged-a.charged).slice(0,100):[]};
+    const cache=this.store.sql.exec('SELECT charged FROM public_cache_write_days WHERE day=?',dayAt(now)).toArray()[0];
+    return {day:dayAt(now),initialized:!!state,policy:READ_BUDGET_POLICY,usage:state?{...usage,denied:state.denied+(this.deniedDay===state.day?this.deniedCount:0)}:null,publicCacheWrites:{initialized:!!cache,charged:cache?Number(cache.charged):null},denialAccounting:'Current-process counts plus legacy persisted counts; bounded events are emitted without storage writes.',active:state?Object.values(state.active).filter(a=>a.started>=now-READ_BUDGET_POLICY.leaseMs).length:0,routes:state?Object.values(state.routes).sort((a,b)=>b.charged-a.charged).slice(0,100):[]};
   }
 }

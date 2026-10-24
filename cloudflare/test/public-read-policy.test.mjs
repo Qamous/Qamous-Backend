@@ -15,8 +15,10 @@ test('snapshot pause and native read limiting work while every database and Dura
       const safe={...env,DB:denied,RUNTIME:denied,READ_BUDGET:denied,PUBLIC_CACHE:denied,COORDINATOR:denied};
       if(mode==='status-probe')safe.COORDINATOR={getByName(){return {status:async()=>({state:'waiting_for_free_quota',cursor:42,halted:false}),recoverBaseline:async()=>({state:'retry_pending',cursor:42})};}};
       if(mode==='export-probe')safe.READ_BUDGET={getByName(){return {reserve:async input=>({allowed:true,...input})};}};
+      if(mode==='cache-prime')safe.PUBLIC_CACHE={getByName(){return {revision:async()=>1,seed:async()=>({stored:true})};}};
       if(mode==='ledger-failure')safe.READ_BUDGET={getByName(){throw Error('Read-budget inspection is unavailable');}};
       if(mode==='native'||mode==='native-missing')safe.PUBLIC_READ_ONLY='false';
+      if(mode==='writes-paused') {safe.PUBLIC_READ_ONLY='false';safe.PUBLIC_WRITES_PAUSED='true';}
       if(mode==='native-missing')safe.PUBLIC_READ_RATE_LIMIT=undefined;
       if(url.pathname==='/__touches')return Response.json({touches});
       if(url.pathname==='/__scheduled') {
@@ -38,11 +40,11 @@ test('snapshot pause and native read limiting work while every database and Dura
       SEO_INTERNAL_SECRET:'synthetic-seo-secret',IMPORT_ADMIN_TOKEN:'synthetic-admin-token',IMPORT_JOB_HASH:'a'.repeat(64)},
     outboundService:()=>{throw Error('Read policy tests must not contact external services');}}));
   t.after(()=>mf.dispose());
-  const call=(path,{method='GET',mode,auth=false,cookie=false}={})=>mf.dispatchFetch('https://api.qamous.org'+path,{method,
+  const call=(path,{method='GET',mode,auth=false,cookie=false,data={}}={})=>mf.dispatchFetch('https://api.qamous.org'+path,{method,
     headers:{Origin:'https://qamous.org','Content-Type':'application/json','x-qamous-seo-internal':'synthetic-seo-secret',
       ...(mode?{'x-test-mode':mode}:{}),...(auth?{Authorization:'Bearer synthetic-admin-token'}:{}),
       ...(cookie?{Cookie:'qamous_session='+'b'.repeat(64)}:{})},
-    body:['POST','PATCH','PUT'].includes(method)?'{}':undefined});
+    body:['POST','PATCH','PUT'].includes(method)?JSON.stringify(data):undefined});
 
   await t.test('health metadata and robots bypass storage even with an old session cookie',async()=>{
     for(const path of ['/','/robots.txt','/__import/health']) {
@@ -72,11 +74,20 @@ test('snapshot pause and native read limiting work while every database and Dura
   await t.test('the importer pauses cron and authenticated admin endpoints before its coordinator',async()=>{
     assert.deepEqual(await (await call('/__scheduled')).json(),{waits:0,touches:0});
     for(const [method,path] of [['POST','/status'],['HEAD','/status'],['POST','/tick'],['POST','/arm'],['PUT','/stage/job.json'],
-      ['POST','/read-budget/reconcile'],['POST','/public-cache/seed']]) {
+      ['POST','/read-budget/reconcile']]) {
       const result=await call('/__import'+path,{method,auth:true});
       assert.equal(result.status,503,method+' '+path);assert.equal(result.headers.get('Retry-After'),'60');
     }
     assert.equal((await call('/__import/status')).status,401,'admin authentication is preserved');
+  });
+  await t.test('public cache warming remains authenticated while imports and all D1 work stay paused',async()=>{
+    assert.equal((await call('/__import/public-cache/revision',{mode:'cache-prime'})).status,401);
+    const revision=await call('/__import/public-cache/revision',{mode:'cache-prime',auth:true});
+    assert.deepEqual(await revision.json(),{revision:1});
+    const seeded=await call('/__import/public-cache/seed',{method:'POST',mode:'cache-prime',auth:true,data:{key:'countries',value:[],revision:1}});
+    assert.equal(seeded.status,200);assert.deepEqual(await seeded.json(),{stored:true});
+    assert.equal((await call('/__import/tick',{method:'POST',mode:'cache-prime',auth:true})).status,503);
+    assert.deepEqual(await (await call('/__touches')).json(),{touches:0});
   });
   await t.test('paused checkpoint inspection requires authentication and never opens mutations or maintenance',async()=>{
     const status=await call('/__import/status',{auth:true,mode:'status-probe'});
@@ -97,6 +108,14 @@ test('snapshot pause and native read limiting work while every database and Dura
     }
     const rejected=await call('/auth/session',{mode:'native'});
     assert.equal(rejected.status,429);assert.equal(rejected.headers.get('Retry-After'),'60');
+  });
+  await t.test('the recovery bridge rejects mutations before session, rate or persistent storage',async()=>{
+    for(const [method,path] of [['POST','/auth/login'],['POST','/contributions'],['POST','/users/register'],['POST','/auth/logout'],['DELETE','/definitions/1'],['PATCH','/word/1']]) {
+      const result=await call(path,{method,mode:'writes-paused',cookie:true});
+      assert.equal(result.status,503,method+' '+path);
+      assert.equal((await result.json()).code,'PUBLIC_WRITES_PAUSED');
+    }
+    assert.deepEqual(await (await call('/__touches')).json(),{touches:0});
   });
   await t.test('missing native binding fails safely rather than falling back to persistent rate limiting',async()=>{
     const rejected=await call('/auth/session',{mode:'native-missing'});

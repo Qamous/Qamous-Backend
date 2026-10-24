@@ -1,6 +1,6 @@
-import {IMPORT_MANIFEST,IMPORT_ACCOUNT,IMPORT_DATABASE,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,importQuota,importPolicyAt,quotaRetryAt,nextImportDay,recoverCloudFlight,validateImportPacket} from './import-cloud-policy.mjs';
+import {IMPORT_MANIFEST,IMPORT_ACCOUNT,IMPORT_DATABASE,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,IMPORT_LEDGER_POLICY_VERSION,importQuota,importLedgerCapacity,importPolicyAt,quotaRetryAt,nextImportDay,recoverCloudFlight,validateImportPacket} from './import-cloud-policy.mjs';
 import {fetchBillingProof} from '../scripts/import-billing.mjs';
-import {guardD1,READ_BUDGET_OBJECT} from './read-budget.ts';
+import {guardD1,READ_BUDGET_OBJECT,ReadBudgetError} from './read-budget.ts';
 
 const encode=new TextEncoder();
 const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',typeof value==='string'?encode.encode(value):value))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -78,6 +78,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
   etag=claimed.etag;
   const persist=async()=>{etag=await saveState(env,state,etag);};
   try {
+    state.ledgerPolicyVersion=IMPORT_LEDGER_POLICY_VERSION;
     if(reschedule){
       state.nextAttemptAt=retryAt;state.quotaPolicy=importPolicyAt(now);
       if(Date.parse(retryAt)>now.getTime()){delete state.lease;await persist();return publicStatus(state);}
@@ -91,7 +92,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     const usage=await (dependencies.usage||accountUsage)(env.CLOUDFLARE_READ_TOKEN);
     // Analytics are only an upward reconciliation signal. They never authorize
     // work: the shared coordinator makes every pre-D1 admission synchronously.
-    await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile({...usage,observedAt});
+    const sharedLedger=await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).reconcile({...usage,observedAt});
     const quota=importQuota(state,usage,now);
     state.days[quota.day]??={...quota.budget,initialAccountReads:usage.rowsRead};
     state.accountUsage=usage;state.effectiveWrites=quota.effectiveWrites;state.planVerifiedAt=proof.observedAt;state.quotaPolicy=quota.policy;
@@ -99,6 +100,10 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
       state.status='waiting_for_free_quota';state.reason='Shared Free quota reserve reached';state.nextAttemptAt=quota.nextAttemptAt;
       delete state.lease;await persist();return publicStatus(state);
     }
+    const operations=2+(!state.schemaVerifiedAt?2:0)+(!state.verifiedScheduledBatch||state.lastAudit?.utcDay!==quota.day||state.cursor+1>=state.packetCount?1:0);
+    const capacity=importLedgerCapacity(sharedLedger,now,operations);
+    state.sharedBudget={checkedAt:observedAt,...capacity};
+    if(!capacity.allowed)throw new ReadBudgetError(capacity.reason,capacity.retryAfter);
     const jobObject=await boundedObject(env.IMPORTS,prefix(env)+'job.json');
     if(!jobObject||await digest(JSON.stringify(jobObject.data))!==env.IMPORT_JOB_HASH)throw Error('Immutable job manifest mismatch');
     const job=jobObject.data;
@@ -143,7 +148,16 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     const results=await env.DB.batch(packet.statements.map(sql=>env.DB.prepare(`/* qamous-read:${perStatement} */ `+sql)));
     if(results.some(r=>r.success===false))throw Error('D1 transaction failed');
     const measured=costs(results);
-    if(!Number.isSafeInteger(measured.rowsWritten)||!Number.isSafeInteger(measured.rowsRead))throw Error('D1 metrics are unavailable');
+    if(![measured.rowsWritten,measured.rowsRead,measured.databaseBytes].every(n=>Number.isSafeInteger(n)&&n>=0))throw Error('D1 metrics are unavailable');
+    // Commit the known cost with its receipt before any subsequent read can
+    // fail. A crash before this persist retains the old conservative reserve;
+    // a crash after it cannot bill the same successful batch twice.
+    const packetDay=state.days[quota.day];packetDay.rowsWritten+=measured.rowsWritten;packetDay.rowsRead+=measured.rowsRead;
+    state.inFlight.measurement={...measured,charged:true};
+    state.lastMeasuredPacket={index:packet.index,...measured,measuredAt:new Date().toISOString()};
+    state.databaseBytes=measured.databaseBytes||state.databaseBytes;
+    await persist();
+    if(measured.rowsWritten>CLOUD_PACKET_RESERVE||state.databaseBytes>IMPORT_LIMITS.databaseBytes)throw Error('Measured packet cost or storage exceeded its rehearsed bound');
     const identities=await verifyIdentities(env,packet);
     // The first scheduled packet which completes records must also pass a full
     // points/counter audit before the laptop is allowed to disable its task.
@@ -154,7 +168,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
       audit=await (dependencies.audit||integrity)(env);state.lastAudit={...audit,utcDay:quota.day};
       if(finalPacket)state.finalAudit=audit;
     }
-    const day=state.days[quota.day];day.rowsWritten+=measured.rowsWritten;day.rowsRead+=measured.rowsRead+identities.rowsRead+(audit?.rowsRead||0);
+    const day=state.days[quota.day];day.rowsRead+=identities.rowsRead+(audit?.rowsRead||0);
     state.cursor++;state.completedRecords+=packet.completed.length;state.databaseBytes=measured.databaseBytes||state.databaseBytes;
     state.lastSuccessAt=new Date().toISOString();state.consecutiveFailures=0;
     state.lastPacket={index:packet.index,sha256:state.inFlight.sha256,origin,recordsCompleted:packet.completed.length,...measured,completedAt:state.lastSuccessAt};
@@ -168,6 +182,12 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
   } catch(error) {
     if(error.code==='LEASE_LOST')return {state:'lease_lost',reason:'Another invocation owns the checkpoint; no further writes submitted'};
     const message=String(error.message||error).slice(0,500);
+    // The guard supplies this evidence only before raw D1 submission. Preserve
+    // every genuinely unknown batch and every already measured receipt.
+    if(error instanceof ReadBudgetError&&error.sqlSubmitted===false&&state.inFlight&&!state.inFlight.measurement) {
+      state.lastNotSubmitted={index:state.inFlight.index,reason:error.reason,checkedAt:new Date().toISOString()};
+      delete state.inFlight;
+    }
     const quota=error.code==='D1_READ_BUDGET'||/D1.*(exceeded|quota|daily limit)|(exceeded|quota|daily limit).*D1/i.test(message);
     const briefBudgetHold=error.code==='D1_READ_BUDGET'&&['burn_rate','concurrency','import_concurrency','coordinator_unavailable'].includes(error.reason);
     const access=error.code==='BILLING_READ_REQUIRED';
@@ -206,7 +226,7 @@ export async function recoverBaselineHalt(env,expected,dependencies={}) {
 }
 
 export function publicStatus(state) {
-  return {state:state.status,jobHash:state.jobHash,manifestHash:state.manifestHash,reason:state.reason,cursor:state.cursor,packetCount:state.packetCount,completedRecords:state.completedRecords,totalRecords:state.totalRecords,databaseBytes:state.databaseBytes,days:state.days,effectiveWrites:state.effectiveWrites,accountUsage:state.accountUsage,quotaPolicy:state.quotaPolicy||importPolicyAt(),nextAttemptAt:state.nextAttemptAt,lastAttemptAt:state.lastAttemptAt,lastScheduledAt:state.lastScheduledAt,lastSuccessAt:state.lastSuccessAt,verifiedScheduledBatch:state.verifiedScheduledBatch,lastPacket:state.lastPacket,recoveredPackets:state.recoveredPackets||0,halted:Boolean(state.halted),updatedAt:state.updatedAt};
+  return {state:state.status,jobHash:state.jobHash,manifestHash:state.manifestHash,reason:state.reason,cursor:state.cursor,packetCount:state.packetCount,completedRecords:state.completedRecords,totalRecords:state.totalRecords,databaseBytes:state.databaseBytes,days:state.days,effectiveWrites:state.effectiveWrites,accountUsage:state.accountUsage,quotaPolicy:state.quotaPolicy||importPolicyAt(),ledgerPolicyVersion:state.ledgerPolicyVersion,nextAttemptAt:state.nextAttemptAt,lastAttemptAt:state.lastAttemptAt,lastScheduledAt:state.lastScheduledAt,lastSuccessAt:state.lastSuccessAt,verifiedScheduledBatch:state.verifiedScheduledBatch,lastPacket:state.lastPacket,lastMeasuredPacket:state.lastMeasuredPacket,lastNotSubmitted:state.lastNotSubmitted,sharedBudget:state.sharedBudget,inFlight:Boolean(state.inFlight),recoveredPackets:state.recoveredPackets||0,halted:Boolean(state.halted),updatedAt:state.updatedAt};
 }
 export default {
   async scheduled(controller,env,ctx) {ctx.waitUntil(runCloudImport(env,'scheduled'));},
