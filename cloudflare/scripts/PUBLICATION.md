@@ -58,7 +58,7 @@ public-definition count, resource byte counts, filenames and SHA-256 hashes
 must pass auditing. Every payload is checked for private fields before the first
 seed request. A recently rebuilt projection cannot renew an old export's age.
 Never edit timestamps or rebuild older SQL merely to renew a build time.
-Seeding is sequential, with batches bounded to both 50 cards and 1.8 MB. It
+Seeding is sequential, with CLI batches bounded to both 10 cards and 160 KB. It
 compares database/snapshot counts before submitting and requires matching
 prepared/eligible/snapshot card counts, matching feed counts and zero missing
 payloads afterward. Reports are written under
