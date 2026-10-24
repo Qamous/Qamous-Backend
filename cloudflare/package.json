@@ -16,7 +16,7 @@
     "@noble/hashes": "2.4.0",
     "bcryptjs": "2.4.3",
     "hono": "4.13.13",
-    "nodemailer": "10.1.2"
+    "nodemailer": "10.2.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261016.1",
