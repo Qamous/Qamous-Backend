@@ -5,6 +5,7 @@ import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {validateProof,validateImportPause,ACCOUNT_ID} from './free-plan-guard.mjs';
 import {verifyPublicSnapshotUnpause} from './public-snapshot-deploy-guard.mjs';
+import {validateLiveImportState,validateImportApiReady} from './import-deploy-transition.mjs';
 import {IMPORT_DATABASE,IMPORT_MANIFEST} from '../src/import-cloud-policy.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const privateRoot=new URL('../private/cloud-import/',import.meta.url);
@@ -24,9 +25,10 @@ await verifyPublicSnapshotUnpause(config);
 if(config.name!=='qamous-import'||config.account_id!==ACCOUNT_ID||config.main!=='src/import-host.mjs'||config.d1_databases?.length!==1||config.d1_databases[0].database_id!==IMPORT_DATABASE||config.durable_objects?.bindings?.length!==3||config.durable_objects.bindings[0].class_name!=='QamousImportState'||config.durable_objects.bindings[1].name!=='READ_BUDGET'||config.durable_objects.bindings[1].class_name!=='QamousReadBudget'||config.durable_objects.bindings[1].script_name!=='qamous-api'||config.durable_objects.bindings[2].name!=='PUBLIC_CACHE'||config.durable_objects.bindings[2].class_name!=='QamousPublicCache'||config.durable_objects.bindings[2].script_name!=='qamous-api'||config.migrations?.length!==1||config.migrations[0].tag!=='v1'||JSON.stringify(config.migrations[0].new_sqlite_classes)!=='["QamousImportState"]'||config.preview_urls!==false||config.workers_dev!==true||config.routes?.length||['ai','r2_buckets','assets','kv_namespaces','queues','workflows','vectorize','hyperdrive','containers','pipelines'].some(key=>config[key]))throw Error('Importer configuration exceeds its approved resources');
 const auth=JSON.parse(command(['auth','token','--json']));if(!auth.token)throw Error('Existing Wrangler authentication required');
 const base='https://api.cloudflare.com/client/v4/accounts/'+ACCOUNT_ID+'/workers/scripts/qamous-import';
-async function platform(path){const r=await fetch(base+path,{headers:{Authorization:'Bearer '+auth.token},signal:AbortSignal.timeout(20000)});const b=await r.json();if(!r.ok||!b.success)throw Error('Live Worker inspection failed: '+r.status);return b.result;}
+async function platform(path,script='qamous-import'){const r=await fetch(base.replace(/qamous-import$/,script)+path,{headers:{Authorization:'Bearer '+auth.token},signal:AbortSignal.timeout(20000)});const b=await r.json();if(!r.ok||!b.success)throw Error('Live Worker inspection failed: '+r.status);return b.result;}
 const settings=await platform('/settings'),schedules=await platform('/schedules');
-validateImportPause(config,schedules.schedules);
+validateLiveImportState(settings,schedules);
+if(!paused)validateImportApiReady(await platform('/settings','qamous-api'));
 if(settings.bindings.find(b=>b.name==='IMPORT_JOB_HASH')?.text!==config.vars.IMPORT_JOB_HASH||settings.bindings.find(b=>b.name==='DB')?.database_id!==IMPORT_DATABASE||settings.bindings.find(b=>b.name==='COORDINATOR')?.namespace_id!=='26a3dafb50294f63b391fb4d1f478fdb')throw Error('Existing deployment identity changed; inspect before updating');
 const accessFile=new URL('access.json',privateRoot);let access;
 try{access=await readJson(accessFile);}catch(error){if(error.code!=='ENOENT')throw error;}
@@ -48,7 +50,7 @@ if(mode==='--recover-monitor'){
     console.log(command(['deploy','--config',configPath,'--keep-vars']));
     const afterSettings=await platform('/settings');validateImportPause(config,(await platform('/schedules')).schedules);
     if(afterSettings.bindings.find(b=>b.name==='PUBLIC_READ_ONLY')?.text!=='true')throw Error('Importer pause was not published');
-    const check=await fetch(access.url+'/status',{headers:{Authorization:'Bearer '+access.adminToken},signal:AbortSignal.timeout(20000)});
+    const check=await fetch(access.url+'/tick',{method:'POST',headers:{Authorization:'Bearer '+access.adminToken},signal:AbortSignal.timeout(20000)});
     if(check.status!==503||(await check.json()).code!=='PUBLIC_READ_ONLY')throw Error('Paused importer still permits dynamic operations');
     const report={publishedAt:new Date().toISOString(),paused:true,deployments:await platform('/deployments'),plan:proof.plan,paidFallback:false};
     await writeFile(new URL('snapshot-pause-deployment.json',privateRoot),JSON.stringify(report,null,2)+'\n');
@@ -59,6 +61,9 @@ if(mode==='--recover-monitor'){
   await writeFile(new URL('pre-catchup-deployment.json',privateRoot),JSON.stringify({verifiedAt:new Date().toISOString(),settings,deployments:await platform('/deployments'),before},null,2)+'\n');
   console.log(command(['deploy','--config',configPath,'--keep-vars','--dry-run']));
   console.log(command(['deploy','--config',configPath,'--keep-vars']));
+  const afterSettings=await platform('/settings');
+  if(afterSettings.bindings.find(b=>b.name==='PUBLIC_READ_ONLY')?.text!=='false')throw Error('Importer unpause was not published');
+  validateImportPause(config,(await platform('/schedules')).schedules);
   const after=await status();
   if(after.jobHash!==before.jobHash||after.manifestHash!==before.manifestHash||after.packetCount!==before.packetCount||after.totalRecords!==before.totalRecords||after.cursor<before.cursor||after.completedRecords<before.completedRecords||after.staging.consumedPagesDeleted<before.staging.consumedPagesDeleted)throw Error('Post-deployment checkpoint or cleanup invariant failed');
   const report={publishedAt:new Date().toISOString(),before,after,deployments:await platform('/deployments'),plan:proof.plan,paidFallback:false};

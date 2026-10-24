@@ -13,6 +13,7 @@ test('snapshot pause and native read limiting work while every database and Dura
     export default {async fetch(request,env,ctx) {
       const url=new URL(request.url),mode=request.headers.get('x-test-mode');
       const safe={...env,DB:denied,RUNTIME:denied,READ_BUDGET:denied,PUBLIC_CACHE:denied,COORDINATOR:denied};
+      if(mode==='status-probe')safe.COORDINATOR={getByName(){return {status:async()=>({state:'waiting_for_free_quota',cursor:42,halted:false})};}};
       if(mode==='native'||mode==='native-missing')safe.PUBLIC_READ_ONLY='false';
       if(mode==='native-missing')safe.PUBLIC_READ_RATE_LIMIT=undefined;
       if(url.pathname==='/__touches')return Response.json({touches});
@@ -57,12 +58,21 @@ test('snapshot pause and native read limiting work while every database and Dura
   });
   await t.test('the importer pauses cron and authenticated admin endpoints before its coordinator',async()=>{
     assert.deepEqual(await (await call('/__scheduled')).json(),{waits:0,touches:0});
-    for(const [method,path] of [['GET','/status'],['POST','/tick'],['POST','/arm'],['PUT','/stage/job.json'],
+    for(const [method,path] of [['POST','/status'],['HEAD','/status'],['POST','/tick'],['POST','/arm'],['PUT','/stage/job.json'],
       ['GET','/read-budget'],['POST','/read-budget/reconcile'],['POST','/public-cache/seed']]) {
       const result=await call('/__import'+path,{method,auth:true});
       assert.equal(result.status,503,method+' '+path);assert.equal(result.headers.get('Retry-After'),'60');
     }
     assert.equal((await call('/__import/status')).status,401,'admin authentication is preserved');
+  });
+  await t.test('paused checkpoint inspection requires authentication and never opens mutations or maintenance',async()=>{
+    const status=await call('/__import/status',{auth:true,mode:'status-probe'});
+    assert.equal(status.status,200);
+    assert.equal(status.headers.get('Cache-Control'),'no-store');
+    assert.deepEqual(await status.json(),{state:'waiting_for_free_quota',cursor:42,halted:false});
+    for(const [method,path] of [['POST','/tick'],['GET','/read-budget'],['POST','/read-budget/reserve']])
+      assert.equal((await call('/__import'+path,{method,auth:true,mode:'status-probe'})).status,503);
+    assert.equal((await call('/__import/status',{mode:'status-probe'})).status,401);
   });
   await t.test('native limiter permits normal anonymous reads then rejects excess without Durable Objects',async()=>{
     for(let i=0;i<2;i++) {
