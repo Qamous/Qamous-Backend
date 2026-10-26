@@ -8,6 +8,7 @@ export const READ_BUDGET_POLICY=Object.freeze({
   leaseMs:60_000,resetQuietMs:60_000,defaultQueryRows:50_000,maxReservationRows:250_000,
   ledgerPublicOperations:6750,ledgerTotalOperations:8000,ledgerImportOperations:4000,
   ledgerRowsPerOperation:8,ledgerWarningOperations:4000,
+  ledgerSettledRows:5,ledgerRecoveredRows:7,
   ledgerPublicRows:54_000,ledgerTotalRows:64_000,ledgerImportRows:32_000,
   cachePublicRows:16_000,cacheTotalRows:20_000,
   auxiliaryTotalRows:12_000,auxiliaryRuntimeRows:3_000,auxiliaryImportRows:6_000,auxiliaryRevisionRows:3_000,
@@ -15,7 +16,7 @@ export const READ_BUDGET_POLICY=Object.freeze({
 type SqlValue=string|number|null;
 interface SqlStore {exec<T extends Record<string,SqlValue>=Record<string,SqlValue>>(query:string,...values:SqlValue[]):{toArray():T[];one():T};}
 interface Store {sql:SqlStore;transactionSync<T>(callback:()=>T):T;}
-interface Lease extends Record<string,SqlValue> {id:string;day:string;tier:ReadTier;route:string;reserved:number;started:number;minute:number;status:string;actual:number|null;}
+interface Lease extends Record<string,SqlValue> {id:string;day:string;tier:ReadTier;route:string;reserved:number;started:number;minute:number;status:string;actual:number|null;storageRefund:number|null;}
 interface Route {route:string;tier:ReadTier;charged:number;measured:number;queries:number;writes:number;denied:number;unknown:number;}
 interface TierRows {public:number;import:number;essential:number;unknown:number;}
 interface State {day:string;charged:number;measured:number;baseline:number;denied:number;tripped:string|null;alerted:number;operations:number;ledgerRows:number;tierLedgerRows?:TierRows;unresolved:number;minutes:Record<string,{charged:number;essential:number}>;routes:Record<string,Route>;active:Record<string,{tier:ReadTier;started:number}>;cleanupCursor:string;}
@@ -34,7 +35,11 @@ export class ReadBudgetLedger {
     this.store=store;this.emit=emit;
     const sql=store.sql;
     sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_days(day TEXT PRIMARY KEY,state TEXT NOT NULL) WITHOUT ROWID');
-    sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER) WITHOUT ROWID');
+    sql.exec('CREATE TABLE IF NOT EXISTS read_budget_compact_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER,storageRefund INTEGER) WITHOUT ROWID');
+    // A constant-size schema edit, covered by the existing startup/safety pool.
+    // NULL tags retain every old allocation. Never infer a refund from historical
+    // query counts, provider sampling, or a lease created before this contract.
+    if(!sql.exec('PRAGMA table_info(read_budget_compact_leases)').toArray().some(column=>column.name==='storageRefund'))sql.exec('ALTER TABLE read_budget_compact_leases ADD COLUMN storageRefund INTEGER');
     sql.exec('CREATE TABLE IF NOT EXISTS public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL) WITHOUT ROWID');
     sql.exec('CREATE TABLE IF NOT EXISTS auxiliary_write_days(day TEXT PRIMARY KEY,state TEXT NOT NULL) WITHOUT ROWID');
     sql.exec('CREATE TABLE IF NOT EXISTS revision_write_holds(id TEXT PRIMARY KEY,day TEXT NOT NULL,cost INTEGER NOT NULL) WITHOUT ROWID');
@@ -187,7 +192,7 @@ export class ReadBudgetLedger {
     if(row)return row;
     if(this.hasLegacyLeases)return sql.exec<Lease>('SELECT * FROM read_budget_leases WHERE id=?',id).toArray()[0];
   }
-  private saveLease(lease:Lease) {this.store.sql.exec('INSERT INTO read_budget_compact_leases(id,day,tier,route,reserved,started,minute,status,actual) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,actual=excluded.actual',lease.id,lease.day,lease.tier,lease.route,lease.reserved,lease.started,lease.minute,lease.status,lease.actual);}
+  private saveLease(lease:Lease) {this.store.sql.exec('INSERT INTO read_budget_compact_leases(id,day,tier,route,reserved,started,minute,status,actual,storageRefund) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,actual=excluded.actual,storageRefund=excluded.storageRefund',lease.id,lease.day,lease.tier,lease.route,lease.reserved,lease.started,lease.minute,lease.status,lease.actual,lease.storageRefund??null);}
   private cleanup(state:State,now:number) {
     // One ordered primary-key probe and at most one row deletion per admission.
     // Never scan/delete a whole historical day during a refusal or rollover.
@@ -235,7 +240,7 @@ export class ReadBudgetLedger {
       state.minutes[minute]={charged:window.charged+input.rows,essential:window.essential+(input.tier==='essential'?input.rows:0)};
       state.active[input.id]={tier:input.tier,started:now};
       const entry=this.route(state,route,input.tier);entry.charged+=input.rows;entry.queries++;
-      this.saveLease({id:input.id,day,tier:input.tier,route:entry.route,reserved:input.rows,started:now,minute,status:'pending',actual:null});
+      this.saveLease({id:input.id,day,tier:input.tier,route:entry.route,reserved:input.rows,started:now,minute,status:'pending',actual:null,storageRefund:READ_BUDGET_POLICY.ledgerRowsPerOperation-READ_BUDGET_POLICY.ledgerSettledRows});
       this.cleanup(state,now);this.alerts(state);this.save(state);
       return {allowed:true,id:input.id,day,reserved:input.rows};
     });
@@ -253,8 +258,23 @@ export class ReadBudgetLedger {
         current.ledgerRows+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.tierLedgerRows!.essential+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.operations++;
       }
       const entry=this.route(state,lease.route,lease.tier);delete state.active[id];
-      if(unknown){lease.status='unknown';entry.unknown++;}
+      if(unknown){
+        // A first unknown settlement writes two rows. Keep the full hold, and
+        // reduce the possible later release from three units to one. Retries
+        // return before this branch and cannot consume or release more rows.
+        if(lease.storageRefund===READ_BUDGET_POLICY.ledgerRowsPerOperation-READ_BUDGET_POLICY.ledgerSettledRows)lease.storageRefund=READ_BUDGET_POLICY.ledgerRowsPerOperation-READ_BUDGET_POLICY.ledgerRecoveredRows;
+        lease.status='unknown';entry.unknown++;
+      }
       else {
+        const refund=lease.day===dayAt(now)&&(lease.storageRefund===3||lease.storageRefund===1)?lease.storageRefund:0;
+        if(refund) {
+          if(state.ledgerRows<refund||state.tierLedgerRows![lease.tier]<refund)throw Error('Inconsistent durable storage allocation');
+          // Reserve <=3 rows (lease + aggregate + one cleanup); known result
+          // adds two. Unknown then known adds four. Only these proved-unused
+          // DO units are released; D1 reads and all old/late holds are separate.
+          state.ledgerRows-=refund;state.tierLedgerRows![lease.tier]-=refund;
+        }
+        lease.storageRefund=0;
         const delta=(actual as number)-lease.reserved;lease.status='settled';lease.actual=actual;
         state.charged+=delta;state.measured+=actual as number;state.unresolved-=lease.reserved;
         const minute=state.minutes[lease.minute];if(minute){minute.charged=Math.max(0,minute.charged+delta);if(lease.tier==='essential')minute.essential=Math.max(0,minute.essential+delta);}

@@ -104,8 +104,18 @@ admitted lifecycle, up to 64,000 daily. Public and import work together may use
 10,000. The import ceiling applies to import consumption, rather
 than accidentally including unrelated essential maintenance. Existing legacy
 allocations retain their original 32-unit charge, including unclassified work;
-deployments cannot erase spent capacity. Actual successful compact lifecycles
-use four rows; unknown-result and cleanup paths remain within eight.
+deployments cannot erase spent capacity. Every new admission still holds eight
+units before SQL. A tagged, known same-day settlement releases three proved-unused
+units, retaining five for its two-row admission, two-row settlement and at most
+one cleanup deletion. An unknown result retains all eight; a later known same-day
+result releases only one, retaining seven for the extra two-row settlement.
+Legacy untagged leases and settlements on a later UTC day release no storage
+allocation. Repeated settlements release nothing. These changes never release
+D1 row allowances beyond the existing measured D1 settlement behavior.
+
+The nullable lease tag is installed using one fixed SQLite schema write in the
+existing startup/safety reserve. The upgrade preserves old rows and totals;
+restarting the object does not rewrite the schema or infer historical refunds.
 
 Denied admissions and repeated unknown settlements write no counters. New UTC
 days retain unresolved D1 reservations, including across object restarts. These
