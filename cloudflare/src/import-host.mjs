@@ -1,7 +1,7 @@
 // Private, card-free staging and checkpoints in one SQLite Durable Object.
 // The same reviewed D1 importer is shared with the original R2 implementation.
 import {DurableObject} from 'cloudflare:workers';
-import {runCloudImport,publicStatus,recoverBaselineHalt} from './import-cloud.mjs';
+import {runCloudImport,runScheduledImports,publicStatus,recoverBaselineHalt} from './import-cloud.mjs';
 import {READ_BUDGET_OBJECT} from './read-budget.ts';
 import {PUBLIC_CACHE_CONTENT_V2,PUBLIC_CACHE_REVISION,validatePublicSeed} from './public-cache-keys.ts';
 import {IMPORT_MANIFEST,IMPORT_LIMITS,quotaRetryAt,nextImportDay} from './import-cloud-policy.mjs';
@@ -150,7 +150,7 @@ async function boundedJson(request,maxBytes) {
   return JSON.parse(new TextDecoder().decode(all));
 }
 export default {
-  async scheduled(controller,env,ctx){if(env.PUBLIC_READ_ONLY==='true')return;ctx.waitUntil(coordinator(env).tick('scheduled'));},
+  async scheduled(controller,env,ctx){if(env.PUBLIC_READ_ONLY==='true')return;ctx.waitUntil(runScheduledImports(env,(e,origin)=>coordinator(e).tick(origin)));},
   async fetch(request,env){
     const url=new URL(request.url);
     if(url.pathname==='/health'&&request.method==='GET')return response({service:'qamous-import',version:2,staging:'Free SQLite Durable Object',configured:/^[a-f0-9]{64}$/.test(env.IMPORT_JOB_HASH)});

@@ -18,10 +18,15 @@ export const nextImportDay = now => {
   if (date.getTime() <= new Date(now).getTime()) date.setUTCDate(date.getUTCDate()+1);
   return date.toISOString();
 };
+// Imports use only the last part of each UTC quota day. This is deliberately
+// UTC-based so daylight saving changes cannot move work across a reset.
+export function nextImportWindow(now=new Date()) {
+  const start=new Date(now);start.setUTCHours(LATE_CATCHUP.startHourUTC,0,0,0);
+  if(start.getTime()<=now.getTime())start.setUTCDate(start.getUTCDate()+1);
+  return start.toISOString();
+}
 export function nextQuotaOpportunity(now=new Date()) {
-  const lateStart=new Date(now);lateStart.setUTCHours(LATE_CATCHUP.startHourUTC,0,0,0);
-  if(now<lateStart)return lateStart.toISOString();
-  return nextImportDay(now);
+  return nextImportWindow(now);
 }
 // Upgrade old quota checkpoints to the new same-day window. Never shorten
 // network/auth retries, integrity holds or final-audit waits. A stale legacy
@@ -53,9 +58,8 @@ export function importQuota(state, usage, now = new Date()) {
   const effectiveReads=Math.max(usage.rowsRead,(budget.initialAccountReads||0)+budget.rowsRead);
   const policy=importPolicyAt(now);
   const remaining=Math.min(policy.dailyImportWriteCeiling-budget.rowsWritten,policy.accountWriteCeiling-effectiveWrites);
-  const settling=now.getUTCHours()===0&&now.getUTCMinutes()<15;
-  const approachingReset=now.getUTCHours()===23&&now.getUTCMinutes()>=55;
-  return {allowed:!settling&&!approachingReset&&remaining>=IMPORT_LIMITS.packetReserve&&effectiveReads<IMPORT_LIMITS.dailyReads,day,budget,effectiveWrites,effectiveReads,remaining,policy,nextAttemptAt:settling?new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate(),0,15)).toISOString():nextQuotaOpportunity(now)};
+  const inWindow=policy.phase==='late_catchup';
+  return {allowed:inWindow&&remaining>=IMPORT_LIMITS.packetReserve&&effectiveReads<IMPORT_LIMITS.dailyReads,day,budget,effectiveWrites,effectiveReads,remaining,policy,nextAttemptAt:nextImportWindow(now)};
 }
 export function importLedgerCapacity(status,now=new Date(),operations=3) {
   const day=now.toISOString().slice(0,10),usage=status?.usage,policy=status?.policy,tiers=usage?.tierLedgerRows;
