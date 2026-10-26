@@ -1,4 +1,4 @@
-import {IMPORT_MANIFEST,IMPORT_ACCOUNT,IMPORT_DATABASE,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,IMPORT_LEDGER_POLICY_VERSION,importQuota,importLedgerCapacity,importPolicyAt,quotaRetryAt,nextImportDay,recoverCloudFlight,validateImportPacket} from './import-cloud-policy.mjs';
+import {IMPORT_MANIFEST,IMPORT_ACCOUNT,IMPORT_DATABASE,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,IMPORT_LEDGER_POLICY_VERSION,importQuota,importLedgerCapacity,importPolicyAt,quotaRetryAt,nextImportWindow,recoverCloudFlight,validateImportPacket} from './import-cloud-policy.mjs';
 import {fetchBillingProof} from '../scripts/import-billing.mjs';
 import {guardD1,READ_BUDGET_OBJECT,ReadBudgetError} from './read-budget.ts';
 
@@ -110,7 +110,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     if(job.manifestHash!==IMPORT_MANIFEST||job.representation!==2||job.exampleAlignment!==1)throw Error('Reviewed forms and examples are required');
     if(state.cursor>=job.packetCount){
       if(!state.finalAudit){
-        if(quota.effectiveReads+2000000>4500000){state.status='awaiting_final_audit';state.reason='Final integrity audit deferred to preserve shared read quota';state.nextAttemptAt=nextImportDay(now);delete state.lease;await persist();return publicStatus(state);}
+        if(quota.effectiveReads+2000000>4500000){state.status='awaiting_final_audit';state.reason='Final integrity audit deferred to preserve shared read quota';state.nextAttemptAt=nextImportWindow(now);delete state.lease;await persist();return publicStatus(state);}
         state.finalAudit=await (dependencies.audit||integrity)(env);state.days[quota.day].rowsRead+=state.finalAudit.rowsRead||0;
       }
       state.status='complete';state.reason='All staged packets completed and final integrity verified';delete state.lease;await persist();return publicStatus(state);
@@ -134,7 +134,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     if(!state.recoveryPoint||state.recoveryPoint.createdAt.slice(0,10)!==quota.day)state.recoveryPoint=await (dependencies.backup||timeTravel)(env.CLOUDFLARE_READ_TOKEN);
     const beforeWrite=dependencies.now?.()||new Date();
     if(beforeWrite.toISOString().slice(0,10)!==quota.day||beforeWrite.getUTCHours()===23&&beforeWrite.getUTCMinutes()>=55) {
-      state.status='waiting_for_free_quota';state.reason='Waiting for UTC quota reset';state.nextAttemptAt=nextImportDay(beforeWrite);delete state.lease;await persist();return publicStatus(state);
+      state.status='waiting_for_free_quota';state.reason='Waiting for the next import window';state.nextAttemptAt=nextImportWindow(beforeWrite);delete state.lease;await persist();return publicStatus(state);
     }
     // Persist the reservation BEFORE submitting SQL. An isolate crash, lost
     // response or expired lease replays this exact insert-only transaction.
@@ -195,7 +195,7 @@ export async function runCloudImport(env,origin='scheduled',dependencies={}) {
     state.consecutiveFailures=(state.consecutiveFailures||0)+1;
     state.status=quota?'waiting_for_free_quota':access?'needs_access':retry?'retry_pending':'halted';state.halted=!quota&&!access&&!retry;
     state.reason=message;state.lastAttemptAt=started;
-    state.nextAttemptAt=briefBudgetHold?new Date(now.getTime()+Math.max(60,error.retryAfter||60)*1000).toISOString():quota?nextImportDay(now):state.halted?null:new Date(now.getTime()+(access?360:Math.min(360,15*2**Math.min(5,state.consecutiveFailures-1)))*60000).toISOString();
+    state.nextAttemptAt=briefBudgetHold?new Date(now.getTime()+Math.max(60,error.retryAfter||60)*1000).toISOString():quota?nextImportWindow(now):state.halted?null:new Date(now.getTime()+(access?360:Math.min(360,15*2**Math.min(5,state.consecutiveFailures-1)))*60000).toISOString();
     delete state.lease;
     try{await persist();}catch(saveError){if(saveError.code!=='LEASE_LOST')throw saveError;}
     console.log(JSON.stringify({event:'qamous_import_wait',...publicStatus(state)}));
@@ -227,6 +227,17 @@ export async function recoverBaselineHalt(env,expected,dependencies={}) {
 
 export function publicStatus(state) {
   return {state:state.status,jobHash:state.jobHash,manifestHash:state.manifestHash,reason:state.reason,cursor:state.cursor,packetCount:state.packetCount,completedRecords:state.completedRecords,totalRecords:state.totalRecords,databaseBytes:state.databaseBytes,days:state.days,effectiveWrites:state.effectiveWrites,accountUsage:state.accountUsage,quotaPolicy:state.quotaPolicy||importPolicyAt(),ledgerPolicyVersion:state.ledgerPolicyVersion,nextAttemptAt:state.nextAttemptAt,lastAttemptAt:state.lastAttemptAt,lastScheduledAt:state.lastScheduledAt,lastSuccessAt:state.lastSuccessAt,verifiedScheduledBatch:state.verifiedScheduledBatch,lastPacket:state.lastPacket,lastMeasuredPacket:state.lastMeasuredPacket,lastNotSubmitted:state.lastNotSubmitted,sharedBudget:state.sharedBudget,inFlight:Boolean(state.inFlight),recoveredPackets:state.recoveredPackets||0,halted:Boolean(state.halted),updatedAt:state.updatedAt};
+}
+// Each packet is admitted, checkpointed and verified independently. Stop on
+// any hold or failure and leave time before the next cron invocation.
+export async function runScheduledImports(env,run=runCloudImport,clock=Date.now) {
+  const deadline=clock()+45000;
+  let result;
+  for(let i=0;i<3&&clock()<deadline;i++) {
+    result=await run(env,'scheduled');
+    if(result.state!=='active')break;
+  }
+  return result;
 }
 export default {
   async scheduled(controller,env,ctx) {ctx.waitUntil(runCloudImport(env,'scheduled'));},

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {IMPORT_ACCOUNT,IMPORT_MANIFEST,IMPORT_LIMITS,CLOUD_PACKET_RESERVE,IMPORT_LEDGER_POLICY_VERSION,importPolicyAt,importQuota,importLedgerCapacity,quotaRetryAt,recoverCloudFlight} from '../src/import-cloud-policy.mjs';
-import {runCloudImport,recoverBaselineHalt,BASELINE_HALT_REASON} from '../src/import-cloud.mjs';
+import {runCloudImport,runScheduledImports,recoverBaselineHalt,BASELINE_HALT_REASON} from '../src/import-cloud.mjs';
 import {READ_BUDGET_POLICY} from '../src/read-budget-ledger.ts';
 
 const at=time=>new Date('2026-10-21T'+time+'Z');
@@ -23,6 +23,8 @@ test('daytime quota hold wakes at the late window rather than skipping to tomorr
   assert.ok(q.remaining<CLOUD_PACKET_RESERVE);assert.equal(q.nextAttemptAt,'2026-10-21T22:00:00.000Z');
   assert.equal(quotaRetryAt(waiting,at('14:00:00')),'2026-10-21T22:00:00.000Z');
   assert.equal(quotaRetryAt({...waiting,lastAttemptAt:'2026-10-21T22:30:00Z'},at('23:00:00')),waiting.nextAttemptAt);
+  const exhausted={...waiting,lastAttemptAt:'2026-10-21T22:30:00Z',nextAttemptAt:'2026-10-22T22:00:00.000Z'};
+  assert.equal(quotaRetryAt(exhausted,at('23:00:00')),exhausted.nextAttemptAt);
 });
 
 test('quota wakeup never bypasses non-quota retries, final audit, or an uncertain write',()=>{
@@ -65,13 +67,29 @@ test('shared usage, maintenance reserves and the full 10k allowance constrain la
   const reads={...usage(0),rowsRead:3900000};assert.equal(importQuota(state(0),reads,at('22:00:00')).allowed,false);
 });
 
-test('settling and five-minute UTC cutoff remain in force',()=>{
+test('imports wait until the late window and stop five minutes before reset',()=>{
   assert.equal(importQuota(state(0),usage(0),at('00:14:59')).allowed,false);
-  assert.equal(importQuota(state(0),usage(0),at('00:14:59')).nextAttemptAt,'2026-10-21T00:15:00.000Z');
+  assert.equal(importQuota(state(0),usage(0),at('00:14:59')).nextAttemptAt,'2026-10-21T22:00:00.000Z');
   assert.equal(importQuota(state(0),usage(0),at('23:55:00')).allowed,false);
-  assert.equal(importQuota(state(0),usage(0),at('23:55:00')).nextAttemptAt,'2026-10-22T00:15:00.000Z');
+  assert.equal(importQuota(state(0),usage(0),at('23:55:00')).nextAttemptAt,'2026-10-22T22:00:00.000Z');
   const next=importQuota({days:{}},{day:'2026-10-22',rowsRead:0,rowsWritten:0},new Date('2026-10-22T00:15:00Z'));
   assert.equal(next.policy.dailyImportWriteCeiling,75000);
+  assert.equal(next.allowed,false);
+  assert.equal(next.nextAttemptAt,'2026-10-22T22:00:00.000Z');
+  assert.equal(importQuota(state(0),usage(0),at('21:59:59')).allowed,false);
+  assert.equal(importQuota(state(0),usage(0),at('22:00:00')).allowed,true);
+});
+
+test('scheduled bursts run at most three independent packets and stop on a hold',async()=>{
+  let calls=0;
+  await runScheduledImports({},async()=>{calls++;return {state:'active'};},()=>0);
+  assert.equal(calls,3);
+  calls=0;
+  await runScheduledImports({},async()=>({state:++calls===2?'waiting_for_free_quota':'active'}),()=>0);
+  assert.equal(calls,2);
+  calls=0;let time=0;
+  await runScheduledImports({},async()=>{calls++;time=45000;return {state:'active'};},()=>time);
+  assert.equal(calls,1);
 });
 
 class Objects {
@@ -107,7 +125,7 @@ test('legacy midnight hold resumes in the late window, then retries are duplicat
 });
 
 test('late window never submits a packet which cannot fit its unchanged reservation',async()=>{
-  for(const writes of [85001,95000,100000]){const f=await fixture('22:00:01',writes);const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,0);assert.equal(result.cursor,0);assert.equal(result.nextAttemptAt,'2026-10-22T00:15:00.000Z');}
+  for(const writes of [85001,95000,100000]){const f=await fixture('22:00:01',writes);const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,0);assert.equal(result.cursor,0);assert.equal(result.nextAttemptAt,'2026-10-22T22:00:00.000Z');}
 });
 
 test('restart recovery still charges an uncertain packet only once on its original day',()=>{
@@ -120,8 +138,10 @@ test('stale legacy quota flight charges the full 10k once before guarded immutab
   const checkpoint=JSON.parse(await (await f.objects.get(key)).text());
   Object.assign(checkpoint,{reason:'The dictionary is temporarily busy. Please try again shortly.',inFlight:{index:0,startedAt:'2026-10-21T04:24:07Z',reservedWrites:5000}});await f.objects.put(key,JSON.stringify(checkpoint));
   let billing=0,observations=0;f.deps.billing=async()=>{billing++;return {accountId:IMPORT_ACCOUNT,observedAt:at('14:00:00').toISOString()};};f.deps.usage=async()=>{observations++;return usage(1000);};
-  const result=await runCloudImport(f.env,'scheduled',f.deps);
-  assert.equal(result.state,'complete');assert.equal(result.cursor,1);assert.equal(result.days['2026-10-21'].rowsWritten,11300);assert.equal(result.recoveredPackets,1);assert.equal(result.verifiedScheduledBatch.integrityPassed,true);assert.equal(billing,1);assert.equal(observations,1);assert.equal(f.batches,1);
+  const held=await runCloudImport(f.env,'scheduled',f.deps);
+  assert.equal(held.state,'waiting_for_free_quota');assert.equal(f.batches,0);assert.equal(held.nextAttemptAt,'2026-10-21T22:00:00.000Z');
+  f.time='22:00:00';const result=await runCloudImport(f.env,'scheduled',f.deps);
+  assert.equal(result.state,'complete');assert.equal(result.cursor,1);assert.equal(result.days['2026-10-21'].rowsWritten,11300);assert.equal(result.recoveredPackets,1);assert.equal(result.verifiedScheduledBatch.integrityPassed,true);assert.equal(billing,2);assert.equal(observations,2);assert.equal(f.batches,1);
   const saved=JSON.parse(await (await f.objects.get(key)).text());assert.equal(saved.inFlight,undefined);assert.equal(saved.lastRecovery.additionalWriteCharge,10000);
   await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,1);assert.equal(JSON.parse(await (await f.objects.get(key)).text()).days['2026-10-21'].rowsWritten,11300);
 });
@@ -163,7 +183,7 @@ test('shared storage and read capacity pause imports automatically before an in-
     assert.equal(f.batches,0);assert.equal(result.halted,false);assert.equal(result.state,'waiting_for_free_quota');
     const saved=JSON.parse(await (await f.objects.get(f.key+'checkpoint.json')).text());assert.equal(saved.inFlight,undefined);
     if(mode==='missing')assert.equal(result.nextAttemptAt,'2026-10-21T22:01:01.000Z');
-    else assert.equal(result.nextAttemptAt,'2026-10-22T00:15:00.000Z');
+    else assert.equal(result.nextAttemptAt,'2026-10-22T22:00:00.000Z');
   }
 });
 
@@ -172,7 +192,7 @@ test('reassessing an old hold still requires fresh storage capacity and persists
   const checkpoint=JSON.parse(await (await f.objects.get(key)).text());checkpoint.reason='The dictionary is temporarily busy. Please try again shortly.';await f.objects.put(key,JSON.stringify(checkpoint));
   const status=ledgerStatus();status.usage.ledgerRows=READ_BUDGET_POLICY.ledgerPublicRows;status.usage.tierLedgerRows.public=READ_BUDGET_POLICY.ledgerPublicRows;
   f.env.READ_BUDGET.getByName=()=>({reconcile:async()=>status});
-  const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,0);assert.equal(result.ledgerPolicyVersion,IMPORT_LEDGER_POLICY_VERSION);assert.equal(result.nextAttemptAt,'2026-10-22T00:15:00.000Z');
+  const result=await runCloudImport(f.env,'scheduled',f.deps);assert.equal(f.batches,0);assert.equal(result.ledgerPolicyVersion,IMPORT_LEDGER_POLICY_VERSION);assert.equal(result.nextAttemptAt,'2026-10-21T22:00:00.000Z');
   assert.equal(JSON.parse(await (await f.objects.get(key)).text()).inFlight,undefined);
 });
 

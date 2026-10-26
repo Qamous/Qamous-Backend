@@ -4,11 +4,11 @@ The private qamous-import Worker continues the approved collection on Workers Fr
 
 ## Late catch-up
 
-The normal 75,000 import-write and 80,000 account-write ceilings stay in place. From **22:00 to 23:55 UTC**, both ceilings become **95,000 measured writes**. This is 6–7:55 p.m. New York during daylight saving time, and 5–6:55 p.m. during standard time. The account limit includes other D1 workloads, not just this dictionary.
+Packets are admitted only from **22:00 to 23:55 UTC**, when the import and account ceilings are **95,000 measured writes**. This is 6–7:55 p.m. New York during daylight saving time, and 5–6:55 p.m. during standard time. The account limit includes other D1 workloads, not just this dictionary. Each scheduled run may process up to three packets sequentially, stopping immediately on a hold or failure; each packet retains its own quota admission and checkpoint.
 
 The existing **10,000-write in-flight reservation stays unchanged** in both windows. The 95k target is a ceiling, not an exact fill: another packet runs only if its full reservation fits. With ordinary small packets this can stop around 85k, leaving room for an unexpectedly large search-index/FTS write burst. The importer does not reduce this margin merely because the site has few users. Read, database-size and integrity guards also remain enforced.
 
-A daytime quota hold now wakes at 22:00 UTC instead of sleeping through the entire catch-up window. Existing checkpoints that were already waiting until the next day are advanced to that same-day opportunity without changing their cursor or counts. Network/auth retries, uncertain in-flight writes, integrity holds and final-audit waits are not brought forward. Writes still stop at 23:55 UTC, and the next day's normal import starts no earlier than 00:15 UTC.
+A daytime quota hold wakes at 22:00 UTC. Existing checkpoints that were already waiting until the next day are advanced to that opportunity without changing their cursor or counts. Network/auth retries, uncertain in-flight writes, integrity holds and final-audit waits are not brought forward. Writes stop at 23:55 UTC; the next day's imports wait for its late window.
 
 ## Monitoring and deployment
 
