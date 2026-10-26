@@ -120,9 +120,11 @@ test('same-minute burn, concurrency, importer concurrency and duplicate reservat
   f.db.close();burst.db.close();
 });
 
-test('storage admissions are nonrefundable, retain an essential reserve, and survive restart',()=>{
+test('proved-unused settlement holds retain the essential reserve and survive restart',()=>{
   const f=fixture();
-  for(let n=0;n<READ_BUDGET_POLICY.ledgerPublicOperations;n++) {
+  const publicOperations=Math.floor((READ_BUDGET_POLICY.ledgerPublicRows-READ_BUDGET_POLICY.ledgerRowsPerOperation)/READ_BUDGET_POLICY.ledgerSettledRows)+1;
+  const totalOperations=Math.floor((READ_BUDGET_POLICY.ledgerTotalRows-READ_BUDGET_POLICY.ledgerRowsPerOperation)/READ_BUDGET_POLICY.ledgerSettledRows)+1;
+  for(let n=0;n<publicOperations;n++) {
     const r=f.ledger.reserve(claim(1),start);assert.equal(r.allowed,true);
     f.ledger.settle(r.id,0,0,start);
   }
@@ -130,14 +132,15 @@ test('storage admissions are nonrefundable, retain an essential reserve, and sur
   assert.equal(f.ledger.reserve(claim(1),start).reason,'do_storage_budget');
   assert.equal(f.ledger.reserve(claim(1,'import'),start).reason,'do_storage_budget');
   const restart=new ReadBudgetLedger(f.store,{day,rows:0},event=>f.events.push(event));
-  for(let n=READ_BUDGET_POLICY.ledgerPublicOperations;n<READ_BUDGET_POLICY.ledgerTotalOperations;n++) {
+  for(let n=publicOperations;n<totalOperations;n++) {
     const r=restart.reserve(claim(1,'essential'),start);assert.equal(r.allowed,true);
     restart.settle(r.id,0,0,start);
   }
   const before=f.db.prepare('SELECT total_changes() AS n').get().n;
   for(let n=0;n<1000;n++)assert.equal(restart.reserve(claim(1,'essential'),start).reason,'do_storage_budget');
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,before,'blocked retries write no rows');
-  assert.equal(restart.status(start).usage.operations,READ_BUDGET_POLICY.ledgerTotalOperations);
+  assert.equal(restart.status(start).usage.operations,totalOperations);
+  assert.equal(restart.status(start).usage.ledgerRows,totalOperations*READ_BUDGET_POLICY.ledgerSettledRows);
   assert.equal(f.events.filter(event=>event.event==='do_storage_budget_threshold').length,1);
   assert.ok(f.events.filter(event=>event.event==='do_storage_budget_denied').length<20);
   f.db.close();
@@ -154,7 +157,7 @@ test('tier classification preserves legacy/global spend and restores only unused
   assert.deepEqual(before.tierLedgerRows,{public:41952,import:2976,essential:9016,unknown:0});
   const admitted=upgraded.reserve(claim(1,'import'),start);assert.equal(admitted.allowed,true);upgraded.settle(admitted.id,0,0,start);
   const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
-  assert.equal(restart.status(start).usage.ledgerRows,53952);assert.equal(restart.status(start).usage.tierLedgerRows.import,2984);
+  assert.equal(restart.status(start).usage.ledgerRows,53949);assert.equal(restart.status(start).usage.tierLedgerRows.import,2981);
   changeState(f,day,state=>{state.ledgerRows+=9072;state.tierLedgerRows.public+=9072;});
   assert.equal(restart.reserve(claim(1,'import'),start).reason,'do_storage_budget');
   assert.equal(restart.reserve(claim(1,'essential'),start).allowed,true,'combined nonessential spend preserves the essential allocation');
@@ -272,8 +275,12 @@ test('a failed compact state write rolls back its lease and never admits SQL',()
   fail=false;
   const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
   assert.equal(restart.status(start).usage.charged,100);
+  assert.equal(restart.status(start).usage.ledgerRows,8,'a failed settlement cannot release storage allocation');
+  assert.equal(f.db.prepare('SELECT storageRefund FROM read_budget_compact_leases WHERE id=?').get(request.id).storageRefund,3,'rollback preserves the durable release tag');
   assert.equal(restart.settle(request.id,1,0,start).settled,true);
   assert.equal(restart.status(start).usage.charged,1);
+  assert.equal(restart.status(start).usage.ledgerRows,5);
+  assert.equal(f.db.prepare('SELECT storageRefund FROM read_budget_compact_leases WHERE id=?').get(request.id).storageRefund,0);
   f.db.close();
 });
 
