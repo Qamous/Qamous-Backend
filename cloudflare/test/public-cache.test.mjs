@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PublicCacheState } from '../src/public-cache-state.ts';
 import { validatePublicSeed } from '../src/public-cache-keys.ts';
+import {publicFreshMs,PUBLIC_STALE_MS} from '../src/public-cache-policy.ts';
 
 function storage(initial=new Map()) {
   return {data:initial,async get(key){return structuredClone(initial.get(key));},async put(key,value){initial.set(key,structuredClone(value));},async delete(key){return initial.delete(key);}};
@@ -32,6 +33,21 @@ test('quota failure serves an eligible public snapshot and suppresses refresh re
 test('moderation invalidation cannot fall back to an older public generation',async()=>{
   const cache=new PublicCacheState(storage());await cache.get(1,1000,86400_000,async()=>[{definition:'removed'}]);
   await assert.rejects(cache.get(2,1000,86400_000,async()=>{throw Error('quota');}),/quota/);
+});
+
+test('unchanged word pages avoid repeated D1 refreshes while edits still invalidate immediately',async()=>{
+  let now=0,loads=0;const store=storage(),load=async()=>{loads++;return [{definition:'Original'}];};
+  const fresh=publicFreshMs('word:2');
+  await new PublicCacheState(store,()=>now).get(1,fresh,PUBLIC_STALE_MS,load);
+  now=60*60_000;
+  // A fresh object must use durable state, not only an in-memory cache.
+  const restarted=new PublicCacheState(store,()=>now);
+  assert.equal((await restarted.get(1,fresh,PUBLIC_STALE_MS,load)).state,'hit');
+  assert.equal(loads,1);
+  const edited=await restarted.get(2,fresh,PUBLIC_STALE_MS,async()=>[{definition:'Corrected'}]);
+  assert.equal(edited.value[0].definition,'Corrected');
+  await assert.rejects(restarted.get(3,fresh,PUBLIC_STALE_MS,async()=>{throw Error('quota');}),/quota/);
+  assert.equal(publicFreshMs('feed:0'),15*60_000);
 });
 
 test('an older in-flight load cannot replace a newer generation',async()=>{

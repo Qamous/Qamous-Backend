@@ -5,6 +5,8 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {publicItems,publicWord,resolvePublicData} from '../src/public-data.ts';
 import {feedCandidatesSql,preparedFeedCandidatesSql} from '../src/feed.ts';
 import {storePreparedCards} from '../src/public-card-payloads.ts';
+import {queryReservation} from '../src/read-budget.ts';
+import {PREPARED_WORD_SQL,RELATED_CARDS_SQL} from '../src/public-data.ts';
 
 function fixture() {
   const sql=new DatabaseSync(':memory:');
@@ -89,6 +91,28 @@ test('prepared word pages preserve every alias and their exact nested serializat
     f.sql.exec('UPDATE definitions SET reportCount=5 WHERE id=1');
     assert.deepEqual(await publicWord(f.db,1,true),await publicWord(f.db,1,false),'combined word/definition threshold remains stricter than cards');
     await assert.rejects(publicWord(f.db,999,true),{status:404});
+  } finally {f.sql.close();}
+});
+
+test('bounded prepared word lookup falls back without dropping meanings or canonical aliases',async()=>{
+  const f=fixture();try {
+    const insertWord=f.sql.prepare("INSERT INTO words(id,userId,arabicWord,francoArabicWord,createdAt) VALUES(?,1,'كتاب','kitab','2026-01-01')");
+    for(let id=10;id<27;id++)insertWord.run(id);
+    // The canonical alias group exceeds the fast path, including reported IDs.
+    await f.seed();
+    f.reads.length=0;
+    assert.deepEqual(await publicWord(f.db,26,true),await publicWord(f.db,26,false));
+    assert.ok(f.reads.length>1);
+    // A single headword with many senses also returns all of them.
+    const insert=f.sql.prepare("INSERT INTO definitions(id,wordId,userId,countryCode,definition,isArabic) VALUES(?,3,1,'EG',?,0)");
+    for(let id=100;id<155;id++)insert.run(id,'Meaning '+id);
+    const expected=await publicWord(f.db,3,false);
+    assert.equal(expected.length,56);
+    assert.deepEqual(await publicWord(f.db,3,true),expected);
+    // The bounded query reserves less without weakening the default guard.
+    assert.equal(queryReservation(PREPARED_WORD_SQL),4096);
+    assert.equal(queryReservation(RELATED_CARDS_SQL),4096);
+    assert.equal(queryReservation('SELECT * FROM definitions'),50_000);
   } finally {f.sql.close();}
 });
 

@@ -8,6 +8,9 @@ import {IMPORT_MANIFEST,IMPORT_LIMITS,quotaRetryAt,nextImportDay} from './import
 import {guardD1} from './read-budget.ts';
 import {storePreparedCards} from './public-card-payloads.ts';
 import {fetchHostedFreeGuard} from '../scripts/hosted-free-guard.mjs';
+import {publicMutationBarrier,refreshPublicMutation,preparePublicMutation} from './public-cache.ts';
+import {resolvePublicMutationScope} from './public-mutation-scope.ts';
+import {correctSeedDefinitions,inspectSeedDefinitions} from './seed-definition-repair.ts';
 
 const encoder=new TextEncoder();
 const checksum=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value)))).map(n=>n.toString(16).padStart(2,'0')).join('');
@@ -163,6 +166,18 @@ export default {
       {status:503,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Retry-After':'60'}});
     try {
       if(url.pathname==='/read-budget'&&request.method==='GET')return response(await env.READ_BUDGET.getByName(READ_BUDGET_OBJECT).status());
+      if(url.pathname==='/maintenance/correct-seed-meanings'&&request.method==='POST') {
+        const input=await boundedJson(request,1024);
+        if(!input||Object.keys(input).join(',')!=='operation'||input.operation!=='correct-legacy-seed-meanings-v1')throw Error('The reviewed seed correction identity is required');
+        const metadata=guardD1(env.DB,env,{route:'maintenance:seed-meaning-scope',tier:'essential'});
+        const barrier=publicMutationBarrier(env,async()=>[...new Set((await Promise.all([1,3].map(id=>
+          resolvePublicMutationScope(metadata,'PATCH','/definitions/'+id,{},1)))).flat())],
+          keys=>refreshPublicMutation(env,keys),(keys,renew)=>preparePublicMutation(env,keys,renew));
+        const db=guardD1(env.DB,env,{route:'maintenance:seed-meanings',tier:'essential',
+          beforeWrite:async()=>{await barrier.beforeWrite();await inspectSeedDefinitions(metadata);},unknownWrite:()=>barrier.unknownWrite()});
+        try {return response(await correctSeedDefinitions(db));}
+        finally {await barrier.finish();}
+      }
       if(url.pathname==='/prepared-cards/maintenance-budget'&&request.method==='POST') {
         if(env.PUBLIC_READ_ONLY!=='true')return response({error:'Prepared-card migration requires paused writers'},409);
         const input=await boundedJson(request,1024);

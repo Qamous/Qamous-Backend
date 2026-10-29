@@ -10,7 +10,7 @@ export const PUBLIC_CARD_BUCKET_SIZE = 100;
 // LIMIT is deliberately inside the materialized country-index sample, before
 // language, visibility, ranking and spelling work. A hostile country request
 // cannot force a complete dialect scan simply because few rows are visible.
-export const RELATED_CARDS_SQL = `WITH sample AS MATERIALIZED (
+export const RELATED_CARDS_SQL = `/* qamous-read:4096 */ WITH sample AS MATERIALIZED (
   SELECT id FROM definitions INDEXED BY definitions_country WHERE countryCode=? ORDER BY id LIMIT ${RELATED_SAMPLE_SIZE}
 ), ranked AS (
   SELECT d.wordId,d.id AS definitionId,w.canonicalArabic AS arabicWord,w.francoArabicWord,
@@ -40,19 +40,36 @@ export function exploreCacheKey(params: URLSearchParams) {
   return 'explore:'+clean.toString();
 }
 
+// Bound both alias and definition fan-out BEFORE visibility filters or payload
+// joins. Larger groups use the complete legacy reader; no meaning is truncated.
+// These index walks touch at most 17 words and 51 definitions. The 4096-row
+// reservation includes the bounded materialized joins and payload lookups.
+export const PREPARED_WORD_SQL = `/* qamous-read:4096 */ WITH variants AS MATERIALIZED (
+  SELECT w.id,w.reportCount FROM words w INDEXED BY words_canonical_arabic
+  WHERE w.canonicalArabic=(SELECT canonicalArabic FROM words WHERE id=?) LIMIT 17
+), candidates AS MATERIALIZED (
+  SELECT d.id,d.wordId,d.reportCount,d.displayLanguage
+  FROM variants v CROSS JOIN definitions d INDEXED BY definitions_word
+  WHERE d.wordId=v.id LIMIT 51
+), bounds AS MATERIALIZED (
+  SELECT (SELECT COUNT(*) FROM variants) AS aliases,
+    (SELECT COUNT(*) FROM candidates) AS meanings,
+    (SELECT MIN(id) FROM variants WHERE reportCount<5) AS canonicalWordId
+) SELECT d.id,b.canonicalWordId,p.payload,
+  (b.aliases=17 OR b.meanings=51) AS incomplete
+  FROM bounds b
+  LEFT JOIN candidates d ON b.aliases<17 AND b.meanings<51
+  LEFT JOIN variants w ON w.id=d.wordId
+  LEFT JOIN public_card_payloads p ON p.definitionId=d.id
+  WHERE b.aliases=17 OR b.meanings=51
+    OR (d.displayLanguage!='hidden' AND d.reportCount+w.reportCount<5)
+  ORDER BY d.id`;
+
 export async function publicWord(db: D1Database,id: number,prepared=false) {
   if(prepared) {
-    const values=await db.prepare(`WITH canonical AS (
-      SELECT input.canonicalArabic,MIN(variant.id) AS canonicalWordId FROM words input
-      JOIN words variant ON variant.canonicalArabic=input.canonicalArabic AND variant.reportCount<5
-      WHERE input.id=?
-    ) SELECT d.id,canonical.canonicalWordId,p.payload FROM canonical
-      JOIN words w ON w.canonicalArabic=canonical.canonicalArabic
-      JOIN public_definitions d ON d.wordId=w.id
-      LEFT JOIN public_card_payloads p ON p.definitionId=d.id
-      WHERE d.reportCount+w.reportCount<5 ORDER BY d.id`).bind(id).all<{id:number;canonicalWordId:number;payload:string|null}>();
+    const values=await db.prepare(PREPARED_WORD_SQL).bind(id).all<{id:number;canonicalWordId:number;payload:string|null;incomplete:number}>();
     if(!values.results.length)throw new ApiError(404,'Word not found');
-    if(values.results.every(row=>typeof row.payload==='string'))return values.results.map(value=>{
+    if(values.results.every(row=>!row.incomplete&&typeof row.payload==='string'))return values.results.map(value=>{
       const card=JSON.parse(value.payload!) as Row;
       validatePublicSeed('items:'+value.id,[card]);
       if(!card||typeof card!=='object'||Number(card.definitionId??card.id)!==value.id)throw new ApiError(503,'Invalid prepared public word');

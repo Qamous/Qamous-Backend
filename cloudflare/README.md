@@ -22,8 +22,10 @@ Worker serves a sitemap index and bounded word shards from public, moderation
 eligible definitions. `/seo/browse/:language` uses an indexed keyset cursor to
 expose every eligible word through ordinary alphabetical links without static
 word files. The API's SEO JSON remains `noindex`; the web Worker renders HTML
-and XML. Cached responses may lag an import or moderation change by up to five
-minutes.
+and XML. Public word payloads remain fresh for 24 hours while their scoped
+content revision is unchanged. Every API read checks that revision; edits and
+moderation invalidate it immediately. Other public payloads retain their
+15-minute refresh interval, and the web Worker's HTML cache lasts 60 seconds.
 
 Set the same high-entropy `SEO_INTERNAL_SECRET` with `wrangler secret put` on
 both `qamous-web` and `qamous-api`. The website passes it only to SEO API reads
