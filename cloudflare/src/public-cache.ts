@@ -8,11 +8,10 @@ import { BudgetedPublicRevision } from './public-cache-revision-budget.ts';
 import { publicItems } from './public-data.ts';
 import { storePreparedCards } from './public-card-payloads.ts';
 import { PUBLIC_CACHE_CONTENT_V2 as CONTENT, PUBLIC_CACHE_REVISION as REVISION, validPublicCacheKey, validatePublicSeed } from './public-cache-keys.ts';
+import {publicFreshMs,PUBLIC_STALE_MS as STALE_MS} from './public-cache-policy.ts';
 
-const FRESH_MS=15*60_000;
 // Only the exact current scoped revision is eligible. A quota outage may last
 // through a reset; unchanged, unwithdrawn content remains browsable meanwhile.
-const STALE_MS=7*24*60*60_000;
 interface PublicValue { status: 200 | 404; json: string }
 type PublicReply = { ok: true; payload: PublicValue; state: string } | { ok: false; status: ApiError['status']; message: string; budgetReason?: string; retryAfter?: number };
 
@@ -75,7 +74,7 @@ export class QamousPublicCache extends DurableObject<Env> {
     }
     const current=await this.env.PUBLIC_CACHE.getByName(REVISION).snapshot([key]);
     if(current.revision!==revision||current.anyPending) throw new Error('Public snapshot generation changed; export a new snapshot');
-    return {stored:await this.cacheFor(key).prime(current.versions[0],{status:200,json:JSON.stringify(value)},FRESH_MS,STALE_MS)};
+    return {stored:await this.cacheFor(key).prime(current.versions[0],{status:200,json:JSON.stringify(value)},publicFreshMs(key),STALE_MS)};
   }
   async publish(key:string,value:unknown,status:200|404,revision:number):Promise<{stored:boolean}> {
     if(!validPublicCacheKey(key)||(status!==200&&status!==404)) throw new Error('Invalid public mutation payload');
@@ -83,16 +82,16 @@ export class QamousPublicCache extends DurableObject<Env> {
     const current=await this.env.PUBLIC_CACHE.getByName(REVISION).snapshot([key]);
     if(current.pending[0]||current.versions[0]!==revision) return {stored:false};
     const lifetime=status===404?5*60_000:undefined;
-    return {stored:await this.cacheFor(key).prime(revision,{status,json:JSON.stringify(value)},lifetime??FRESH_MS,lifetime??STALE_MS,'essential')};
+    return {stored:await this.cacheFor(key).prime(revision,{status,json:JSON.stringify(value)},lifetime??publicFreshMs(key),lifetime??STALE_MS,'essential')};
   }
   async get(key: string,revision: number): Promise<PublicReply> {
     if(!validPublicCacheKey(key) || !Number.isSafeInteger(revision) || revision<1) return {ok:false,status:400,message:'Invalid public cache request'};
     try {
-      const result=await this.cacheFor(key).get<PublicValue>(revision,FRESH_MS,STALE_MS,async()=>{
+      const result=await this.cacheFor(key).get<PublicValue>(revision,publicFreshMs(key),STALE_MS,async()=>{
         const db=guardD1(this.env.DB,this.env,{route:'cache:'+key.split(':')[0],tier:'public'});
         try {return {status:200,json:JSON.stringify(await resolvePublicData(db,key,this.env.PUBLIC_CARD_PAYLOADS==='true'))};}
         catch(error) {if(error instanceof ApiError && error.status===404) return {status:404,json:JSON.stringify(error.message)};throw error;}
-      },value=>value.status===404?{freshMs:5*60_000,staleMs:5*60_000}:{freshMs:FRESH_MS,staleMs:STALE_MS});
+      },value=>value.status===404?{freshMs:5*60_000,staleMs:5*60_000}:{freshMs:publicFreshMs(key),staleMs:STALE_MS});
       if(result.state!=='hit') console.log(JSON.stringify({event:'public_cache',resource:key.split(':')[0],state:result.state}));
       return {ok:true,payload:result.value,state:result.state};
     } catch(error) {
