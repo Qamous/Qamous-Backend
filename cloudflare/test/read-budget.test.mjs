@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {ReadBudgetLedger,READ_BUDGET_POLICY} from '../src/read-budget-ledger.ts';
-import {guardD1,ReadBudgetError,queryReservation} from '../src/read-budget.ts';
+import {guardD1,ReadBudgetError,queryReservation,queryCostKey} from '../src/read-budget.ts';
 
 const day='2026-10-22',start=Date.parse(day+'T12:00:00Z');
 function fixture(rows=0) {
@@ -65,13 +65,15 @@ test('unknown results keep their reservation after a crash; only concurrency exp
   f.db.close();
 });
 
-test('cost overruns open a durable circuit instead of silently expanding the estimate',()=>{
+test('cost overruns quarantine their query while unrelated public and essential reads remain available',()=>{
   const f=fixture(),r=f.ledger.reserve(claim(100),start);
   f.ledger.settle(r.id,101,0,start+1);
   assert.equal(f.ledger.status(start+1).usage.charged,101);
-  assert.equal(f.ledger.reserve(claim(1,'essential'),start+2).reason,'cost_circuit_open');
+  assert.equal(f.ledger.reserve(claim(1,'essential'),start+2).allowed,true);
+  assert.equal(f.ledger.reserve(claim(1,'public','/countries'),start+2).allowed,true);
   const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
-  assert.equal(restart.reserve(claim(1),start+3).reason,'cost_circuit_open');
+  assert.equal(restart.reserve(claim(1),start+3).reason,'query_cost_circuit_open');
+  assert.equal(restart.status(start+3).usage.tripped,null);
   assert.equal(f.events.filter(e=>e.event==='d1_read_cost_overrun').length,1);
   f.db.close();
 });
@@ -98,8 +100,30 @@ test('baseline reconciliation is fresh, upward only, and cannot clear an overrun
   assert.throws(()=>f.ledger.reconcile({day:'2026-10-21',rowsRead:0,observedAt:new Date(start).toISOString()},start));
   assert.equal(f.ledger.reconcile({day,rowsRead:1,observedAt:new Date(start).toISOString()},start).usage.charged,100);
   const r=f.ledger.reserve(claim(100),start);f.ledger.settle(r.id,101,0,start);
-  assert.equal(f.ledger.reconcile({day,rowsRead:0,observedAt:new Date(start).toISOString()},start).usage.tripped,'reservation_exceeded');
+  const reconciled=f.ledger.reconcile({day,rowsRead:0,observedAt:new Date(start).toISOString()},start);
+  assert.equal(Object.keys(reconciled.costCircuits).length,1);
+  assert.equal(f.ledger.reserve(claim(1),start).reason,'query_cost_circuit_open');
   f.db.close();
+});
+
+test('legacy whole-account trips recover only with complete retained costs and a current provider baseline',()=>{
+  const f=fixture(),request=f.ledger.reserve(claim(50_000,'public','/word/search/kwd_old'),start);
+  f.ledger.settle(request.id,91_864,0,start);
+  changeState(f,day,state=>{state.tripped='reservation_exceeded';delete state.costCircuits;});
+  const before=f.ledger.status(start).usage;
+  assert.equal(f.ledger.reserve(claim(1,'essential','/auth/health'),start).reason,'cost_circuit_open');
+  assert.equal(f.ledger.reconcile({day,rowsRead:91_863,observedAt:new Date(start).toISOString()},start).usage.tripped,'reservation_exceeded');
+  const recovered=f.ledger.reconcile({day,rowsRead:91_864,observedAt:new Date(start).toISOString()},start);
+  assert.equal(recovered.usage.tripped,null);assert.equal(recovered.usage.charged,before.charged);
+  assert.equal(recovered.usage.ledgerRows,before.ledgerRows);assert.equal(recovered.usage.operations,before.operations);
+  assert.equal(f.ledger.reserve(claim(1,'public','/word/search/kwd_old'),start).reason,'query_cost_circuit_open');
+  assert.equal(f.ledger.reserve(claim(1,'essential','/auth/health'),start).allowed,true);
+  assert.equal(f.events.filter(event=>event.event==='d1_legacy_cost_circuit_isolated').length,1);
+  const uncertain=fixture(),pending=uncertain.ledger.reserve(claim(100),start);
+  changeState(uncertain,day,state=>{state.tripped='reservation_exceeded';});
+  assert.equal(uncertain.ledger.reconcile({day,rowsRead:100,observedAt:new Date(start).toISOString()},start).usage.tripped,'reservation_exceeded');
+  assert.equal(uncertain.ledger.status(start).usage.unresolved,100);
+  assert.ok(pending.allowed);f.db.close();uncertain.db.close();
 });
 
 test('same-minute burn, concurrency, importer concurrency and duplicate reservations are bounded',()=>{
@@ -118,6 +142,19 @@ test('same-minute burn, concurrency, importer concurrency and duplicate reservat
   assert.equal(burst.ledger.reserve(claim(50_000,'essential'),start).allowed,true);
   assert.equal(burst.ledger.reserve(claim(1,'essential'),start).reason,'burn_rate');
   f.db.close();burst.db.close();
+});
+
+test('a late overrun retains its carry and charges the excess before unrelated queries resume',()=>{
+  const f=fixture(),request=f.ledger.reserve({...claim(100),queryKey:'a'.repeat(64)},start);
+  const tomorrow=start+86400000;
+  f.ledger.reconcile({day:'2026-10-23',rowsRead:4_499_950,observedAt:new Date(tomorrow).toISOString()},tomorrow);
+  f.ledger.settle(request.id,201,0,tomorrow);
+  const status=f.ledger.status(tomorrow);
+  assert.equal(status.usage.charged,4_500_051);assert.equal(status.usage.baseline,4_500_051);
+  assert.equal(status.usage.tripped,null);assert.equal(Object.keys(status.costCircuits).length,1);
+  assert.equal(f.ledger.reserve({...claim(1),queryKey:'b'.repeat(64)},tomorrow).reason,'daily_budget');
+  assert.equal(f.ledger.reserve({...claim(1,'essential'),queryKey:'c'.repeat(64)},tomorrow).allowed,true);
+  f.db.close();
 });
 
 test('proved-unused settlement holds retain the essential reserve and survive restart',()=>{
@@ -374,6 +411,43 @@ function fakeD1({reads=12,writes=0,wait,fail=false,missing=false}={}) {
   return {db,get calls(){return calls;},get firstCalls(){return firstCalls;}};
 }
 const environment=(ledger,now=start)=>({READ_BUDGET:{getByName:()=>({reserve:input=>Promise.resolve(ledger.reserve(input,now)),settle:(...args)=>Promise.resolve(ledger.settle(...args,now))})}});
+
+test('the recorded 91864-row search cannot shut down health or escape quarantine through new keywords and routes',async()=>{
+  const f=fixture(),raw=fakeD1({reads:91_864}),sql='SELECT answer FROM sample';
+  const search=guardD1(raw.db,environment(f.ledger),{route:'/word/search/kwd=first',tier:'public'});
+  await search.prepare(sql).bind('first').all();assert.equal(raw.calls,1);
+  assert.equal(f.ledger.status(start).usage.charged,91_864);
+  const restart=new ReadBudgetLedger(f.store,{day,rows:0},()=>{});
+  const before=f.db.prepare('SELECT total_changes() AS n').get().n;
+  for(const route of ['/word/search/kwd=other','/word/999','/another-api']) {
+    await assert.rejects(()=>guardD1(raw.db,environment(restart),{route,tier:'public'}).prepare(sql).bind('other').all(),
+      error=>error instanceof ReadBudgetError&&error.reason==='query_cost_circuit_open'&&error.sqlSubmitted===false);
+  }
+  assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n,before,'denials spend no storage writes');
+  assert.equal(raw.calls,1);
+  const healthy=fakeD1({reads:1}),health=guardD1(healthy.db,environment(restart),{route:'/auth/health',tier:'essential'});
+  assert.equal(await health.prepare('SELECT 1').first('answer'),42);
+  assert.equal(healthy.calls,1);assert.equal(restart.status(start).usage.charged,91_865);
+  const key=await queryCostKey([sql]);assert.match(key,/^[a-f0-9]{64}$/);
+  assert.equal(Object.keys(restart.status(start).costCircuits)[0],'sql:'+key);
+  assert.equal(restart.status(start).routes[0].route,'/word/search/:filter','search text is not retained as a route identity');
+  f.db.close();
+});
+
+test('query quarantines remain bounded while daily spend and independent healthy queries remain enforced',()=>{
+  const f=fixture();
+  for(let index=0;index<140;index++) {
+    const request=f.ledger.reserve({...claim(1),queryKey:index.toString(16).padStart(64,'0')},start);
+    assert.equal(request.allowed,true);f.ledger.settle(request.id,2,0,start);
+  }
+  assert.equal(Object.keys(f.ledger.status(start).costCircuits).length,128);
+  assert.equal(f.ledger.status(start).usage.charged,280);
+  assert.equal(f.ledger.reserve({...claim(1),queryKey:'f'.repeat(64)},start).allowed,true);
+  assert.equal(f.ledger.reserve({...claim(1),queryKey:'not-a-server-hash'},start).reason,'invalid_reservation');
+  f.ledger.reconcile({day,rowsRead:4_500_000,observedAt:new Date(start).toISOString()},start);
+  assert.equal(f.ledger.reserve({...claim(1),queryKey:'e'.repeat(64)},start).reason,'daily_budget');
+  f.db.close();
+});
 
 test('first/all/run/batch/session are metered including reads caused by writes; raw escape hatches fail',async()=>{
   const f=fixture(),raw=fakeD1({reads:12,writes:4}),env=environment(f.ledger),db=guardD1(raw.db,env,{route:'/word/124?private=1',tier:'public'});

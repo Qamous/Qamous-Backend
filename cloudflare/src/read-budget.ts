@@ -1,8 +1,8 @@
-import {READ_BUDGET_POLICY,type ReadTier,type Admission} from './read-budget-ledger.ts';
+import {READ_BUDGET_POLICY,type ReadTier,type Admission,type Reservation} from './read-budget-ledger.ts';
 
 export const READ_BUDGET_OBJECT='qamous-d1-account-v1';
 export interface ReadBudgetStub {
-  reserve(input:{id:string;rows:number;route:string;tier:ReadTier}):Promise<Admission>;
+  reserve(input:Reservation):Promise<Admission>;
   settle(id:string,actual:number|null,writes?:number):Promise<unknown>;
 }
 export interface ReadBudgetEnvironment {READ_BUDGET:{getByName(name:string):ReadBudgetStub};}
@@ -13,13 +13,13 @@ export class ReadBudgetError extends Error {
   readonly reason:string;
   readonly retryAfter:number;
   readonly sqlSubmitted:boolean;
-  constructor(reason:string,retryAfter=60,sqlSubmitted=false) {super('The dictionary is temporarily busy. Please try again shortly.');this.name='ReadBudgetError';this.reason=reason;this.retryAfter=retryAfter;this.sqlSubmitted=sqlSubmitted;}
+  constructor(reason:string,retryAfter=60,sqlSubmitted=false) {super(reason==='query_cost_circuit_open'?'This request is temporarily unavailable. You can still browse other dictionary pages.':'The dictionary is temporarily busy. Please try again shortly.');this.name='ReadBudgetError';this.reason=reason;this.retryAfter=retryAfter;this.sqlSubmitted=sqlSubmitted;}
 }
 const fail=(reason:string):never=>{throw new ReadBudgetError(reason);};
 
 // Cost contracts are authored in reviewed server SQL, never in request input.
 // The default is deliberately large and is NOT a proof for arbitrary SQL. An
-// unexpected measured overrun opens the durable circuit instead of retrying it.
+// unexpected measured overrun quarantines that SQL shape instead of retrying it.
 export function queryReservation(sql:string):number {
   const contract=/^\s*\/\*\s*qamous-read:(\d+)\s*\*\//.exec(sql);
   if(contract) {
@@ -36,13 +36,20 @@ export function queryReservation(sql:string):number {
   return READ_BUDGET_POLICY.defaultQueryRows;
 }
 function routeName(route:string) {
-  return route.split('?')[0].replace(/(reset-password\/)[^/]+/g,'$1:token').replace(/\/[0-9]+(?=\/|$)/g,'/:id').slice(0,96);
+  return route.split('?')[0].replace(/(reset-password\/)[^/]+/g,'$1:token').replace(/^\/word\/search\/.+$/,'/word/search/:filter').replace(/\/[0-9]+(?=\/|$)/g,'/:id').slice(0,96);
+}
+
+// Bound values and request paths never enter this identity. Changing an IP,
+// keyword, card ID or route cannot retry SQL that already exceeded its cost.
+export async function queryCostKey(sql:string[]):Promise<string> {
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(sql)));
+  return Array.from(new Uint8Array(bytes),value=>value.toString(16).padStart(2,'0')).join('');
 }
 
 /** Closed facade: no raw D1 object or statement is exposed to application code. */
 export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:ReadBudgetContext):D1Database {
   const route=routeName(context.route);
-  const statementData=new WeakMap<object,{raw:D1PreparedStatement;rows:number;writes:boolean}>();
+  const statementData=new WeakMap<object,{raw:D1PreparedStatement;rows:number;writes:boolean;sql:string}>();
   const coordinator=()=>{
     if(!env.READ_BUDGET?.getByName)return fail('coordinator_unavailable');
     return env.READ_BUDGET.getByName(READ_BUDGET_OBJECT);
@@ -51,16 +58,17 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
     const data=statements.map(statement=>statementData.get(statement)||fail('foreign_statement'));
     const rows=data.reduce((sum,statement)=>sum+statement.rows,0);
     if(rows>READ_BUDGET_POLICY.maxReservationRows)return fail('batch_cost_too_large');
+    const queryKey=await queryCostKey(data.map(statement=>statement.sql));
     let stub:ReadBudgetStub;const id=crypto.randomUUID();
     let admission:Admission;
     try {
       stub=coordinator();
-      admission=await stub.reserve({id,rows,route,tier:context.tier});
+      admission=await stub.reserve({id,rows,route,tier:context.tier,queryKey});
       // Short bounded contention retries are safe only after a definitive
       // denial (no reservation exists). Never retry a lost acknowledgement.
       for(let retry=0;!admission.allowed&&admission.reason==='concurrency'&&retry<4;retry++) {
         await new Promise(resolve=>setTimeout(resolve,50*2**retry));
-        admission=await stub.reserve({id,rows,route,tier:context.tier});
+        admission=await stub.reserve({id,rows,route,tier:context.tier,queryKey});
       }
     }catch {return fail('coordinator_unavailable');}
     if(!admission.allowed)throw new ReadBudgetError(admission.reason,admission.retryAfter);
@@ -112,7 +120,7 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
         },
         raw:():Promise<never>=>Promise.reject(new ReadBudgetError('raw_without_cost_metadata_disabled')),
       };
-      statementData.set(statement,{raw,rows,writes});return Object.freeze(statement);
+      statementData.set(statement,{raw,rows,writes,sql});return Object.freeze(statement);
     };
     return wrap(owner.prepare(sql));
   };

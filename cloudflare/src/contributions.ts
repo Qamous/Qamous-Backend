@@ -69,7 +69,7 @@ export async function saveContribution(db: D1Database, userId: number, input: Re
   // A contribution has at most 49 statements, each inserting/updating one
   // record through indexed keys. Reserve substantial trigger/index headroom
   // per statement while retaining the original atomic transaction. A measured
-  // aggregate overrun opens the shared read circuit; LIMIT is never a bound.
+  // aggregate overrun quarantines that SQL batch; LIMIT is never a bound.
   const prepareWrite=(sql:string)=>db.prepare('/* qamous-read:4000 */ '+sql);
   const statements = [prepareWrite(`INSERT INTO contribution_submissions(id,userId,payloadHash,createdAt,arabicForm,francoForm,transliteration,ipa,englishExample,dialect,arabicVariants,francoVariants,exampleAlignment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET payloadHash=CASE WHEN contribution_submissions.userId=excluded.userId AND contribution_submissions.payloadHash=excluded.payloadHash THEN contribution_submissions.payloadHash ELSE NULL END`)
