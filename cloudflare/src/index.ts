@@ -9,7 +9,7 @@ import { guardD1,ReadBudgetError } from './read-budget';
 import { countryCodes } from '../../src/utils/country-codes';
 import { validateWriteRequest, requireJson } from './request-policy';
 import { exploreQuery } from './explore';
-import { keywordSearchQuery } from './keyword-search';
+import { keywordSearchPage, keywordSearchQuery } from './keyword-search';
 import { feedCandidatesSql, feedScript, shuffledFeed, type FeedCandidate } from './feed';
 import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
@@ -305,8 +305,11 @@ app.get('/word/search/all',async c=>{admin(c);return c.json((await c.env.DB.prep
 app.get('/word/search/:filter',async c=>{
   const filter=c.req.param('filter');const user=c.get('user')?.id||0;
   if(filter.startsWith('kwd=')) {
-    const query=keywordSearchQuery(filter.slice(4),user);
-    return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(query.sql).bind(...query.values).all()).results.map(withSpellings)));
+    const page=keywordSearchPage(new URL(c.req.url).searchParams);
+    const query=keywordSearchQuery(filter.slice(4),user,page?{limit:page.limit+1,offset:(page.page-1)*page.limit,language:page.language}:undefined);
+    const rows=(await c.env.DB.prepare(query.sql).bind(...query.values).all()).results;
+    const results=await attachProvenance(c.env.DB,(page?rows.slice(0,page.limit):rows).map(row=>{const {searchLanguageRanking,...visible}=row;return withSpellings(visible);}));
+    return c.json(page?{results,...page,hasMore:rows.length>page.limit}:results);
   }
   if(filter.startsWith('iso=')) {
     const code=filter.slice(4).toUpperCase();
