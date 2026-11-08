@@ -1,6 +1,7 @@
 import type { Hono, Context } from 'hono';
 import { stream } from 'hono/streaming';
 import { ApiError, positiveId, type Row, withWord } from './data.ts';
+import { ReadBudgetError } from './read-budget.ts';
 import type { AppContext } from './security';
 import { formatImportedDefinition,formatImportedExample } from './definition-display.mjs';
 import { stripTashkil,hasTashkil,countryForDialect } from './arabic-model.mjs';
@@ -29,6 +30,19 @@ export function isImportPreview(url: string, env: object): boolean {
   return (flag === 'true' || flag === true)
     && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname);
 }
+async function provenanceReads(db:D1Database,statements:D1PreparedStatement[]):Promise<D1Result<Row>[]> {
+  try {return await db.batch<Row>(statements);}
+  catch(error) {
+    // A denied 200k reservation submitted no SQL. During a crawl burst, four
+    // separately guarded reads can fit while that pessimistic batch cannot.
+    // Never replay submitted/uncertain work or bypass daily/storage limits.
+    if(!(error instanceof ReadBudgetError)||error.reason!=='burn_rate'||error.sqlSubmitted)throw error;
+    const results:D1Result<Row>[]=[];
+    for(const statement of statements)results.push(await statement.all<Row>());
+    return results;
+  }
+}
+
 // Batched lookups avoid an additional database request for each card/source.
 export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row[]> {
   if (!rows.length) return rows;
@@ -38,7 +52,7 @@ export async function attachProvenance(db: D1Database, rows: Row[]): Promise<Row
     const part = ids.slice(i, i + 90), placeholders = part.map(() => '?').join(',');
     // A single guarded D1 batch holds one reservation for these four read-only
     // statements. It keeps complete cards with one accounting lifecycle.
-    const [sourceRows, exampleRows, pronunciationRows, formRows] = await db.batch<Row>([
+    const [sourceRows, exampleRows, pronunciationRows, formRows] = await provenanceReads(db,[
       db.prepare('SELECT p.definitionId,t.text AS changes,s.id AS sourceId,s.name AS sourceName,' +
         's.license,s.licenseUrl,s.rightsStatus,s.attributionRequired,s.credit,s.notice,' +
         'r.sourceUrl,r.sourceEntryId,r.dialect,r.transliteration,r.originalMetadata,r.recordKey,r.arabic,r.franco,r.displayFranco,u.username ' +

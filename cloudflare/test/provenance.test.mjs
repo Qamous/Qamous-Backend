@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { attachProvenance, isImportPreview, licenseLink, registerProvenanceRoutes } from '../src/provenance.ts';
 import { publicUser } from '../src/data.ts';
+import { ReadBudgetError } from '../src/read-budget.ts';
 
 function fixture() {
   const sql = new DatabaseSync(':memory:');
@@ -47,6 +48,17 @@ test('cards get original credit, linked license, importer disclosure, and labele
     assert.deepEqual(result[1].sourcePronunciations,[]);
     assert.ok(!JSON.stringify(result).includes('imports.invalid'));
   } finally { sql.close(); }
+});
+
+test('provenance does not replay submitted, uncertain, daily-budget, or storage failures',async()=>{
+  for(const error of [new ReadBudgetError('burn_rate',12,true),new ReadBudgetError('daily_budget'),new ReadBudgetError('do_storage_budget'),new Error('D1 request outcome unknown')]) {
+    const {sql,db,calls}=fixture();
+    try {
+      db.batch=async()=>{throw error;};
+      await assert.rejects(attachProvenance(db,[{definitionId:1}]),received=>received===error);
+      assert.equal(calls.length,0,'individual statements must not replay an unproved batch failure');
+    }finally{sql.close();}
+  }
 });
 
 test('pronunciations follow the linked meaning and source record, never every meaning of the word', async () => {

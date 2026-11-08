@@ -5,7 +5,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
-import {keywordSearchQuery} from '../src/keyword-search.ts';
+import {keywordSearchPage,keywordSearchQuery} from '../src/keyword-search.ts';
 import {escapeLike,normalize,rankedSql} from '../src/data.ts';
 
 const migrations=readdirSync(new URL('../migrations/',import.meta.url)).filter(name=>name.endsWith('.sql')).sort()
@@ -25,7 +25,25 @@ test('indexed keyword lookup preserves literal matching, canonical ranking, lang
     db.exec("UPDATE definitions SET displayLanguage='hidden' WHERE id=6; INSERT INTO word_spellings(wordId,userId,script,spelling,searchText,createdAt) VALUES(3,1,'franco','together','together','2026-01-01'); INSERT INTO contribution_submissions(id,userId,payloadHash,wordId,createdAt,francoForm) VALUES('sense-1',1,'hash',1,'2026-01-01','sense-specific'); UPDATE definitions SET submissionId='sense-1' WHERE id=1; INSERT INTO \"definition-likes-dislikes\"(definitionId,userId,liked) VALUES(2,2,1);");
     for(const term of ['كتاب','كِتاب','kit','Library','good','together','sense-specific','100%_literal','%_','a','لا','hidden','" OR *','عبارة تجريبية غير موجودة']) {
       const query=keywordSearchQuery(term,2);
-      assert.deepEqual(db.prepare(query.sql).all(...query.values),db.prepare(originalSql).all(...originalValues(term,2)),term);
+      const expected=db.prepare(originalSql).all(...originalValues(term,2));
+      assert.deepEqual(db.prepare(query.sql).all(...query.values),expected,term);
+      const pages=[];
+      for(let offset=0;offset<expected.length;offset+=2) {
+        const page=keywordSearchQuery(term,2,{limit:2,offset});
+        pages.push(...db.prepare(page.sql).all(...page.values));
+      }
+      assert.deepEqual(pages,expected,'pagination preserves ranking and every result: '+term);
+      for(const language of [0,1]) {
+        const canonical=row=>db.prepare('SELECT canonicalArabic FROM words WHERE id=?').get(row.wordId).canonicalArabic;
+        const preferred=new Set(expected.filter(row=>row.isArabic===language).map(canonical));
+        const visible=expected.filter(row=>row.isArabic===language||!preferred.has(canonical(row)));
+        const localized=[];
+        for(let offset=0;offset<visible.length;offset++) {
+          const page=keywordSearchQuery(term,2,{limit:1,offset,language});
+          localized.push(...db.prepare(page.sql).all(...page.values).map(({searchLanguageRanking,...row})=>row));
+        }
+        assert.deepEqual(localized,visible.map(row=>({...row})),'language preference is applied before pagination: '+term);
+      }
     }
     const query=keywordSearchQuery('عبارة تجريبية غير موجودة');
     const plans=db.prepare('EXPLAIN QUERY PLAN '+query.sql).all(...query.values).map(row=>row.detail);
@@ -38,9 +56,12 @@ test('indexed keyword lookup preserves literal matching, canonical ranking, lang
 
 test('an absent Arabic phrase avoids a full dictionary scan and an actual D1 cost overrun leaves other HTTP routes healthy',{timeout:60_000},async t=>{
   const built=await build({stdin:{resolveDir:fileURLToPath(new URL('..',import.meta.url)),loader:'ts',contents:`
-    import api from './src/index.ts'; import {guardD1} from './src/read-budget.ts';
+    import api from './src/index.ts'; import {guardD1} from './src/read-budget.ts'; import {attachProvenance} from './src/provenance.ts';
     export {QamousRuntime,QamousReadBudget,QamousPublicCache} from './src/index.ts';
     export default {async fetch(request,env,ctx) {
+      if(new URL(request.url).pathname==='/test/provenance') {
+        return Response.json(await attachProvenance(guardD1(env.DB,env,{route:'cache:word',tier:'public'}),[{definitionId:1000}]));
+      }
       if(new URL(request.url).pathname==='/test/overrun') {
         const db=guardD1(env.DB,env,{route:'/test/overrun',tier:'public'});
         try {return Response.json(await db.prepare('/* qamous-read:1 */ SELECT COUNT(*) AS n FROM words WHERE id>=?').bind(1000).all());}
@@ -71,6 +92,26 @@ test('an absent Arabic phrase avoids a full dictionary scan and an actual D1 cos
   const call=path=>mf.dispatchFetch('https://api.qamous.org'+path);
   const search=await call('/word/search/kwd='+encodeURIComponent(term));assert.equal(search.status,200,await search.clone().text());assert.deepEqual(await search.json(),[]);
   const bindings=await mf.getBindings(),ledger=bindings.READ_BUDGET.getByName('qamous-d1-account-v1');
+  if(Date.now()%60000>55000)await new Promise(resolve=>setTimeout(resolve,60001-Date.now()%60000));
+  const prior=await ledger.reserve({id:'preceding-crawl-burst',rows:100000,route:'/test/crawl',tier:'public'});
+  assert.equal(prior.allowed,true);await ledger.settle(prior.id,100000);
+  const beforeBurst=await ledger.status();
+  const provenance=await call('/test/provenance');assert.equal(provenance.status,200,await provenance.clone().text());
+  assert.deepEqual((await provenance.json())[0].sourceCredits,[]);
+  const afterBurst=await ledger.status();
+  assert.equal(afterBurst.usage.operations-beforeBurst.usage.operations,4,'a refused 200k batch is replaced by four individually admitted reads');
+  assert.ok(afterBurst.usage.charged-beforeBurst.usage.charged<1000,'real D1 metadata queries remain fully charged');
+  assert.equal(afterBurst.usage.unresolved,0);
+  await db.prepare("UPDATE definitions SET definition=? WHERE wordId IN (SELECT id FROM words WHERE francoArabicWord LIKE 'other-100%')").bind('A meaning '+ 'x'.repeat(2500)).run();
+  const pagedPath='/word/search/kwd=unrelated-100';
+  const first=await call(pagedPath+'?page=1&limit=20'),firstText=await first.text();assert.equal(first.status,200,firstText);
+  const firstPage=JSON.parse(firstText);assert.equal(firstPage.results.length,20);assert.equal(firstPage.hasMore,true);assert.equal(firstPage.page,1);
+  assert.ok(Buffer.byteLength(firstText)<262144,'the initial server-rendered page stays within the existing payload guard');
+  const second=await call(pagedPath+'?page=2&limit=20');assert.equal(second.status,200);const secondPage=await second.json();
+  assert.equal(new Set([...firstPage.results,...secondPage.results].map(row=>row.definitionId)).size,40,'consecutive pages do not overlap');
+  const legacy=await call(pagedPath),legacyText=await legacy.text();assert.equal(legacy.status,200,legacyText);
+  assert.ok(Array.isArray(JSON.parse(legacyText)));assert.ok(Buffer.byteLength(legacyText)>262144,'the fixture reproduces the oversized unpaginated response');
+  for(const params of ['page=0','page=1.5','page=1&page=2','limit=51','limit=0'])assert.equal((await call(pagedPath+'?'+params)).status,400,params);
   assert.equal((await call('/test/overrun')).status,200);
   const before=await ledger.status();assert.equal(Object.keys(before.costCircuits).length,1);assert.equal(before.usage.tripped,null);
   const denied=await call('/test/overrun');assert.equal(denied.status,503);assert.equal((await denied.json()).reason,'query_cost_circuit_open');
@@ -78,4 +119,11 @@ test('an absent Arabic phrase avoids a full dictionary scan and an actual D1 cos
   for(const path of ['/auth/health','/countries','/word/search/kwd='+encodeURIComponent(term)]) {
     const response=await call(path);assert.equal(response.status,200,path+': '+await response.text());
   }
+});
+
+test('keyword paging is opt-in and rejects invalid limits and duplicate controls',()=>{
+  assert.equal(keywordSearchPage(new URLSearchParams()),null);
+  assert.deepEqual(keywordSearchPage(new URLSearchParams('page=2&limit=20')),{page:2,limit:20});
+  for(const params of ['page=0','page=-1','page=NaN','page=10001','limit=51','limit=1&limit=2','page=1&language=xx','page=1&language=en&language=ar'])
+    assert.throws(()=>keywordSearchPage(new URLSearchParams(params)),error=>error.status===400,params);
 });
