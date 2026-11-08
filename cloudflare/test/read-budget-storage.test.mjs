@@ -120,7 +120,7 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
   assert.ok(capped.writes<=capped.usage.ledgerRows);assert.ok(capped.usage.ledgerRows<=capped.policy.ledgerTotalRows);
   for(const scenario of ['schema-upgrade','restart-unknown','late']) {
     const response=await mf.dispatchFetch('https://local/'+scenario);assert.equal(response.status,200,await response.clone().text());const result=await response.json();t.diagnostic(JSON.stringify(result));
-    if(scenario==='schema-upgrade'){assert.equal(result.migrationWrites,1,'one fixed schema write uses the existing startup reserve without rewriting 1000 saved leases');assert.equal(result.restartWrites,0);assert.equal(result.preserved.ledgerRows,8000);assert.equal(result.settled.ledgerRows,8000,'old untagged leases never release historical allocation');}
+    if(scenario==='schema-upgrade'){assert.equal(result.migrationWrites,2,'fixed nullable schema additions use the startup reserve without rewriting 1000 saved leases');assert.equal(result.restartWrites,0);assert.equal(result.preserved.ledgerRows,8000);assert.equal(result.settled.ledgerRows,8000,'old untagged leases never release historical allocation');}
     if(scenario==='restart-unknown'){assert.equal(result.held.ledgerRows,8);assert.equal(result.held.unresolved,1);assert.equal(result.final.ledgerRows,7);assert.equal(result.final.unresolved,0);assert.ok(result.writes<=7);assert.equal(result.duplicateWrites,0);}
     if(scenario==='late'){assert.equal(result.original.ledgerRows,8);assert.equal(result.today.ledgerRows,8);assert.equal(result.today.charged,1,'D1 carry is not refunded by the storage optimization');assert.ok(result.writes<=8);}
   }

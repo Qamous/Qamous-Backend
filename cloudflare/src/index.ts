@@ -9,6 +9,7 @@ import { guardD1,ReadBudgetError } from './read-budget';
 import { countryCodes } from '../../src/utils/country-codes';
 import { validateWriteRequest, requireJson } from './request-policy';
 import { exploreQuery } from './explore';
+import { keywordSearchQuery } from './keyword-search';
 import { feedCandidatesSql, feedScript, shuffledFeed, type FeedCandidate } from './feed';
 import { parseContribution, saveContribution } from './contributions';
 import { attachProvenance, registerProvenanceRoutes, isImportPreview } from './provenance';
@@ -304,9 +305,8 @@ app.get('/word/search/all',async c=>{admin(c);return c.json((await c.env.DB.prep
 app.get('/word/search/:filter',async c=>{
   const filter=c.req.param('filter');const user=c.get('user')?.id||0;
   if(filter.startsWith('kwd=')) {
-    const keyword=text(filter.slice(4),'keyword',200);
-    const like='%'+escapeLike(normalize(keyword))+'%';
-    return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(rankedSql("AND (w.searchText LIKE ? ESCAPE '\\' OR d.searchText LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM word_spellings a WHERE a.wordId=w.id AND a.searchText LIKE ? ESCAPE '\\') OR d.submissionId IN (SELECT id FROM contribution_submissions WHERE francoForm LIKE ? ESCAPE '\\'))")).bind(user,user,user,like,like,like,like).all()).results.map(withSpellings)));
+    const query=keywordSearchQuery(filter.slice(4),user);
+    return c.json(await attachProvenance(c.env.DB,(await c.env.DB.prepare(query.sql).bind(...query.values).all()).results.map(withSpellings)));
   }
   if(filter.startsWith('iso=')) {
     const code=filter.slice(4).toUpperCase();

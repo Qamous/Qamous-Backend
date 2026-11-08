@@ -166,7 +166,12 @@ Pre-admission reservations and global concurrency are strict. A reservation is
 not a database execution limit: D1 supplies the true scan cost after execution.
 Reviewed indexed writes have explicit conservative cost contracts. General SQL
 uses a 50,000-row reservation; a future query-plan or dataset-size change can
-exceed it once and trip the circuit. SQL `LIMIT` alone is never treated as a scan
+exceed it once and quarantine that SQL shape. The SHA-256 identity covers authored
+SQL and batch structure, independently of bound values, client addresses and URLs.
+Other queries retain their ordinary admissions, including essential reads. The
+measured overrun remains charged in full; daily, minute, concurrency and storage
+ceilings still apply. Query quarantines persist across restarts until UTC reset,
+with at most 128 saved identities. SQL `LIMIT` alone is never treated as a scan
 bound. Review and rehearse changed queries against growth fixtures before a
 release. Direct administrator dashboard/REST/Wrangler SQL bypasses application
 admission and must not be used for routine jobs. This system does not impose a
@@ -176,6 +181,19 @@ Use `node scripts/guarded-d1.mjs --file reviewed.sql --reserve 200000` for
 reviewed, bounded maintenance. Read the result before retrying a failed write:
 a lost acknowledgement may conceal a committed transaction. Public content
 changes require cache invalidation; prefer the application mutation routes.
+
+An older `reservation_exceeded` whole-account trip is converted only during an
+authenticated reconciliation with a fresh account-wide provider baseline that
+covers every charged read, no unresolved work, and retained settled-overrun
+evidence. The conversion preserves every usage counter and isolates the old
+offending route. It does not clear existing query quarantines or raise a quota.
+Do not fabricate a baseline from the ledger or reuse rolling 24-hour statistics.
+
+Keyword searches of three or more normalized characters resolve definition IDs
+through the existing trigram indexes before ranking and enrichment. Alternate
+spellings and contribution forms are scanned once, rather than once per public
+definition. Short literal substring searches keep their established behavior;
+like any general SQL, an unexpected cost affects their query family alone.
 
 ## Public cache and search
 
