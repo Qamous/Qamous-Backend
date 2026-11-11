@@ -6,6 +6,8 @@ import {build} from 'esbuild';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {PREPARED_WORD_SQL} from '../src/public-data.ts';
 import {SEED_CORRECTIONS} from '../src/seed-definition-repair.ts';
+import {SEO_BUCKET_EXISTS_SQL} from '../src/seo.ts';
+import {queryReservation} from '../src/read-budget.ts';
 
 test('bounded crawl reads and authenticated seed correction preserve caches and quota accounting',async t=>{
   const built=await build({stdin:{resolveDir:fileURLToPath(new URL('..',import.meta.url)),loader:'ts',contents:`
@@ -35,6 +37,8 @@ test('bounded crawl reads and authenticated seed correction preserve caches and 
   await db.exec("WITH RECURSIVE n(x) AS (SELECT 1000 UNION ALL SELECT x+1 FROM n WHERE x<6500) INSERT INTO words(id,userId,arabicWord,createdAt) SELECT x,1,'unrelated-'||x,'2026-01-01' FROM n; INSERT INTO definitions(id,wordId,userId,definition,isArabic) SELECT id,id,1,'Unrelated',0 FROM words WHERE id>=1000;");
   const measured=await db.prepare(PREPARED_WORD_SQL).bind(2).all();
   assert.equal(measured.results.length,2);assert.ok(measured.meta.rows_read<4096);
+  const exists=await db.prepare(SEO_BUCKET_EXISTS_SQL).bind(0).all();
+  assert.equal(exists.results.length,1);assert.ok(exists.meta.rows_read<=128);assert.equal(queryReservation(SEO_BUCKET_EXISTS_SQL),128);
   assert.ok((await db.prepare('SELECT COUNT(*) FROM definitions').all()).meta.rows_read>4096,'fixture can detect an unbounded scan');
   const call=path=>mf.dispatchFetch('https://api.qamous.org'+path);
   const word=async id=>{const r=await call('/seo/word/'+id);assert.equal(r.status,200,await r.clone().text());return r.json();};

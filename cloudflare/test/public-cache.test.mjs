@@ -75,3 +75,41 @@ test('public recovery rejects credentials, private reactions, invalid resources 
   assert.throws(()=>validatePublicSeed('word:1',{}),{status:400});
   assert.doesNotThrow(()=>validatePublicSeed('word:1',[{id:1,isLiked:false,isDisliked:false,isReported:false,word:{id:1,arabicWord:'كلمة'}}]));
 });
+
+test('eligible cached pages respond during one background refresh and adopt its completed value',{timeout:2000},async()=>{
+  let now=0,loads=0;const background=[],gate=deferred();
+  const cache=new PublicCacheState(storage(),()=>now,undefined,undefined,work=>background.push(work));
+  await cache.prime(1,{word:'Published'},10,100_000);now=20;
+  const load=async()=>{loads++;await gate.promise;return {word:'Refreshed'};};
+  const first=await cache.get(1,10,100_000,load);
+  assert.equal(first.state,'stale');assert.equal(first.value.word,'Published');
+  assert.equal((await cache.get(1,10,100_000,load)).value.word,'Published');
+  assert.equal(loads,1);assert.equal(background.length,1);
+  gate.resolve();await Promise.all(background);
+  assert.equal((await cache.get(1,10,100_000,load)).value.word,'Refreshed');assert.equal(loads,1);
+});
+
+test('background refreshes cannot serve or overwrite a newer moderation revision',{timeout:2000},async()=>{
+  let now=0;const background=[],older=deferred();
+  const cache=new PublicCacheState(storage(),()=>now,undefined,undefined,work=>background.push(work));
+  await cache.prime(1,{word:'Before edit'},10,100_000);now=20;
+  assert.equal((await cache.get(1,10,100_000,async()=>{await older.promise;return {word:'Older refresh'};})).state,'stale');
+  await assert.rejects(cache.get(2,10,100_000,async()=>{throw Error('budget refused');}),/budget refused/);
+  assert.equal(background.length,1,'the invalidated old copy cannot authorize a background-only read');
+  assert.equal((await cache.get(2,10,100_000,async()=>({word:'Moderated'}))).value.word,'Moderated');
+  older.resolve();await Promise.all(background);
+  assert.equal((await cache.get(2,10,100_000,()=>{throw Error('must use current cache');})).value.word,'Moderated');
+});
+
+test('sitemaps remain warm for a day but a changed revision still requires fresh data',async()=>{
+  for(const key of ['seo-index','seo-shard:1000094']) {
+    let now=0,loads=0;const store=storage(),fresh=publicFreshMs(key);
+    assert.equal(fresh,24*60*60_000);
+    await new PublicCacheState(store,()=>now).get(1,fresh,PUBLIC_STALE_MS,async()=>{loads++;return [{id:1}];});
+    now=6*60*60_000;
+    assert.equal((await new PublicCacheState(store,()=>now).get(1,fresh,PUBLIC_STALE_MS,()=>{throw Error('D1 should stay cold');})).state,'hit');
+    assert.equal(loads,1);
+    await assert.rejects(new PublicCacheState(store,()=>now).get(2,fresh,PUBLIC_STALE_MS,async()=>{throw Error('new revision unavailable');}),/new revision unavailable/);
+  }
+  assert.equal(publicFreshMs('seo-browse:en:'),15*60_000);
+});

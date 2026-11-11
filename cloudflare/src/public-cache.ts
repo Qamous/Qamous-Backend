@@ -9,6 +9,7 @@ import { publicItems } from './public-data.ts';
 import { storePreparedCards } from './public-card-payloads.ts';
 import { PUBLIC_CACHE_CONTENT_V2 as CONTENT, PUBLIC_CACHE_REVISION as REVISION, validPublicCacheKey, validatePublicSeed } from './public-cache-keys.ts';
 import {publicFreshMs,PUBLIC_STALE_MS as STALE_MS} from './public-cache-policy.ts';
+import {PublicCacheLoadGate} from './public-cache-load-gate.ts';
 
 // Only the exact current scoped revision is eligible. A quota outage may last
 // through a reset; unchanged, unwithdrawn content remains browsable meanwhile.
@@ -20,6 +21,8 @@ type PublicReply = { ok: true; payload: PublicValue; state: string } | { ok: fal
 // boundary. The separate coordinator versions only resources a mutation touches.
 export class QamousPublicCache extends DurableObject<Env> {
   private caches=new Map<string,PublicCacheState>();
+  private loads=new Map<string,Promise<PublicValue>>();
+  private loadGate=new PublicCacheLoadGate();
   private cacheSizes=new Map<string,number>();
   private cacheBytes=0;
   private freshMetadata=new Map<string,PublicCacheFreshness>();
@@ -37,7 +40,9 @@ export class QamousPublicCache extends DurableObject<Env> {
       },{
         get:()=>this.freshMetadata.get(key),
         put:value=>{if((this.freshMetadata.get(key)?.revision||0)>value.revision)return;this.freshMetadata.delete(key);this.freshMetadata.set(key,value);while(this.freshMetadata.size>8192)this.freshMetadata.delete(this.freshMetadata.keys().next().value!);},
-      });
+      },typeof this.ctx.waitUntil==='function'?work=>this.ctx.waitUntil(work.catch(()=>{
+        console.log(JSON.stringify({event:'public_cache_refresh_failed',resource:key.split(':')[0]}));
+      })):undefined);
     this.caches.set(key,cache);this.pruneCaches();return cache;
   }
   private pruneCaches() {
@@ -84,14 +89,23 @@ export class QamousPublicCache extends DurableObject<Env> {
     const lifetime=status===404?5*60_000:undefined;
     return {stored:await this.cacheFor(key).prime(revision,{status,json:JSON.stringify(value)},lifetime??publicFreshMs(key),lifetime??STALE_MS,'essential')};
   }
+  private load(key:string,revision:number):Promise<PublicValue> {
+    const identity=revision+':'+key,known=this.loads.get(identity);
+    if(known)return known;
+    // Keep refresh coalescing independent of the hot-memory LRU. Eviction
+    // during a wide crawl must not submit a second load for the same version.
+    const work=this.loadGate.run(async():Promise<PublicValue>=>{
+      const db=guardD1(this.env.DB,this.env,{route:'cache:'+key.split(':')[0],tier:'public'});
+      try {return {status:200,json:JSON.stringify(await resolvePublicData(db,key,this.env.PUBLIC_CARD_PAYLOADS==='true'))};}
+      catch(error) {if(error instanceof ApiError&&error.status===404)return {status:404,json:JSON.stringify(error.message)};throw error;}
+    }).finally(()=>{this.loads.delete(identity);});
+    this.loads.set(identity,work);return work;
+  }
   async get(key: string,revision: number): Promise<PublicReply> {
     if(!validPublicCacheKey(key) || !Number.isSafeInteger(revision) || revision<1) return {ok:false,status:400,message:'Invalid public cache request'};
     try {
-      const result=await this.cacheFor(key).get<PublicValue>(revision,publicFreshMs(key),STALE_MS,async()=>{
-        const db=guardD1(this.env.DB,this.env,{route:'cache:'+key.split(':')[0],tier:'public'});
-        try {return {status:200,json:JSON.stringify(await resolvePublicData(db,key,this.env.PUBLIC_CARD_PAYLOADS==='true'))};}
-        catch(error) {if(error instanceof ApiError && error.status===404) return {status:404,json:JSON.stringify(error.message)};throw error;}
-      },value=>value.status===404?{freshMs:5*60_000,staleMs:5*60_000}:{freshMs:publicFreshMs(key),staleMs:STALE_MS});
+      const result=await this.cacheFor(key).get<PublicValue>(revision,publicFreshMs(key),STALE_MS,()=>this.load(key,revision),
+        value=>value.status===404?{freshMs:5*60_000,staleMs:5*60_000}:{freshMs:publicFreshMs(key),staleMs:STALE_MS});
       if(result.state!=='hit') console.log(JSON.stringify({event:'public_cache',resource:key.split(':')[0],state:result.state}));
       return {ok:true,payload:result.value,state:result.state};
     } catch(error) {
