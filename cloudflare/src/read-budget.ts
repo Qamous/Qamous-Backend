@@ -64,9 +64,14 @@ export function guardD1(database:D1Database,env:ReadBudgetEnvironment,context:Re
     try {
       stub=coordinator();
       admission=await stub.reserve({id,rows,route,tier:context.tier,queryKey});
-      // Short bounded contention retries are safe only after a definitive
-      // denial (no reservation exists). Never retry a lost acknowledgement.
-      for(let retry=0;!admission.allowed&&admission.reason==='concurrency'&&retry<4;retry++) {
+      // A large pending batch can temporarily hold nearly the whole minute
+      // allowance. Give small public reads the same bounded contention wait;
+      // once that batch settles its unused reservation becomes available.
+      // Large batches still fail promptly so their reviewed read-only split
+      // fallback can run. Never retry submitted SQL or a lost acknowledgement.
+      const retryable=(result:Admission)=>!result.allowed&&(result.reason==='concurrency'
+        ||result.reason==='burn_rate'&&context.tier==='public'&&rows<=READ_BUDGET_POLICY.defaultQueryRows&&data.every(statement=>!statement.writes));
+      for(let retry=0;retryable(admission)&&retry<4;retry++) {
         await new Promise(resolve=>setTimeout(resolve,50*2**retry));
         admission=await stub.reserve({id,rows,route,tier:context.tier,queryKey});
       }

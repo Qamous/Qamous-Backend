@@ -29,7 +29,8 @@ export class PublicCacheState {
   private durable?:StoredPublicCacheEntry;
   private memoryChanged?:(bytes:number)=>void;
   private freshness?:PublicFreshnessMemo;
-  constructor(store: PublicCacheStore,clock: () => number = Date.now,memoryChanged?:(bytes:number)=>void,freshness?:PublicFreshnessMemo) {this.store=store;this.clock=clock;this.memoryChanged=memoryChanged;this.freshness=freshness;}
+  private background?:(work:Promise<unknown>)=>void;
+  constructor(store: PublicCacheStore,clock: () => number = Date.now,memoryChanged?:(bytes:number)=>void,freshness?:PublicFreshnessMemo,background?:(work:Promise<unknown>)=>void) {this.store=store;this.clock=clock;this.memoryChanged=memoryChanged;this.freshness=freshness;this.background=background;}
   private async digest(json:string):Promise<string> {return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json)))].map(value=>value.toString(16).padStart(2,'0')).join('');}
   releaseMemory():void {this.memory=undefined;this.durable=undefined;}
   private remember(entry:StoredPublicCacheEntry) {
@@ -88,6 +89,7 @@ export class PublicCacheState {
     if (saved && (this.retryAt.get(revision) || 0) > this.clock()) return { value: saved.value, state: 'stale' };
     const pending = this.pending.get(revision);
     if (pending) {
+      if(saved&&this.background)return {value:saved.value,state:'stale'};
       const result = await pending;
       return { value: result.value as T, state: result.state === 'stale' ? 'stale' : 'coalesced' };
     }
@@ -112,8 +114,13 @@ export class PublicCacheState {
         throw error;
       }
     })();
-    this.pending.set(revision, work);
-    try { return await work; } finally { if (this.pending.get(revision) === work) this.pending.delete(revision); }
+    const tracked=work.finally(()=>{if(this.pending.get(revision)===tracked)this.pending.delete(revision);});
+    this.pending.set(revision,tracked);
+    // read() accepts only this exact current revision, including moderation
+    // invalidations. Keep that eligible public copy responsive during refresh;
+    // a new revision or a truly cold request must still await its own load.
+    if(saved&&this.background){this.background(tracked);return {value:saved.value,state:'stale'};}
+    return await tracked;
   }
 
   private async read<T>(revision: number): Promise<{record: CacheRecord; value: T} | undefined> {

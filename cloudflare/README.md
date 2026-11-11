@@ -22,10 +22,19 @@ Worker serves a sitemap index and bounded word shards from public, moderation
 eligible definitions. `/seo/browse/:language` uses an indexed keyset cursor to
 expose every eligible word through ordinary alphabetical links without static
 word files. The API's SEO JSON remains `noindex`; the web Worker renders HTML
-and XML. Public word payloads remain fresh for 24 hours while their scoped
-content revision is unchanged. Every API read checks that revision; edits and
-moderation invalidate it immediately. Other public payloads retain their
-15-minute refresh interval, and the web Worker's HTML cache lasts 60 seconds.
+and XML. Public word payloads, the sitemap index and word sitemap shards remain
+fresh for 24 hours while their scoped content revision is unchanged. Every API
+read checks that revision; edits and moderation invalidate it immediately.
+Other public payloads retain their 15-minute refresh interval, and the web
+Worker's HTML cache lasts 60 seconds.
+
+An eligible cached resource is served while one refresh runs in the background.
+Cold loads share two loader slots and a FIFO queue of at most 64 waiting loads,
+with a five-second queue deadline. Hot reads bypass the queue, and duplicate
+loads stay coalesced even when their hot-memory cache entry is evicted. Every
+SQL operation still requires the existing read-budget admission. Small public
+reads can wait up to 750 ms for a temporary reservation to settle; hard quota
+denials and uncertain acknowledgements are never retried.
 
 Set the same high-entropy `SEO_INTERNAL_SECRET` with `wrangler secret put` on
 both `qamous-web` and `qamous-api`. The website passes it only to SEO API reads

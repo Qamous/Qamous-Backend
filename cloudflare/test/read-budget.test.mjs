@@ -13,6 +13,38 @@ function fixture(rows=0) {
 }
 let seq=0;
 const claim=(rows=100,tier='public',route='/word/:id')=>({id:'request-'+(++seq),rows,tier,route});
+
+test('small public reads wait for a pessimistic in-flight batch reservation to settle before submitting SQL',async()=>{
+  const f=fixture();let attempts=0,sql=0;
+  const prior=f.ledger.reserve(claim(1),start);f.ledger.settle(prior.id,1,0,start);
+  const heavy=f.ledger.reserve(claim(200_000,'public','cache:heavy'),start);assert.ok(heavy.allowed);
+  const env={READ_BUDGET:{getByName:()=>({
+    reserve:async input=>{if(++attempts===2)f.ledger.settle(heavy.id,3,0,start);return f.ledger.reserve(input,start);},
+    settle:async(id,actual,writes)=>f.ledger.settle(id,actual,writes,start),
+  })}};
+  const raw={prepare:()=>({async all(){sql++;return {success:true,results:[],meta:{rows_read:7,rows_written:0}};}})};
+  try {
+    await guardD1(raw,env,{route:'cache:word',tier:'public'}).prepare('SELECT * FROM words ORDER BY id').all();
+    assert.equal(attempts,2);assert.equal(sql,1);
+    const status=f.ledger.status(start);
+    assert.equal(status.usage.charged,11);assert.equal(status.usage.unresolved,0);assert.deepEqual(status.costCircuits,{});
+  }finally{f.db.close();}
+});
+
+test('bounded burn retries never bypass an exhausted minute or retry a write or larger batch',async()=>{
+  for(const [sql,rows,expectedAttempts] of [
+    ['SELECT 1',1,5],['UPDATE words SET reportCount=reportCount',50_000,1],['/* qamous-read:200000 */ SELECT * FROM words',200_000,1],
+  ]) {
+    const f=fixture(),spent=f.ledger.reserve(claim(250_000),start);f.ledger.settle(spent.id,250_000,0,start);
+    let attempts=0,submitted=0;
+    const env={READ_BUDGET:{getByName:()=>({reserve:async input=>{attempts++;assert.equal(input.rows,rows);return f.ledger.reserve(input,start);}})}};
+    const raw={prepare:()=>({async all(){submitted++;throw Error('SQL must not execute');}})};
+    try {
+      await assert.rejects(guardD1(raw,env,{route:'cache:word',tier:'public'}).prepare(sql).all(),{reason:'burn_rate',sqlSubmitted:false});
+      assert.equal(attempts,expectedAttempts);assert.equal(submitted,0);assert.equal(f.ledger.status(start).usage.charged,250_000);
+    }finally{f.db.close();}
+  }
+});
 function changeState(f,day,change) {
   const state=JSON.parse(f.db.prepare('SELECT state FROM read_budget_compact_days WHERE day=?').get(day).state);
   change(state);f.db.prepare('UPDATE read_budget_compact_days SET state=? WHERE day=?').run(JSON.stringify(state),day);

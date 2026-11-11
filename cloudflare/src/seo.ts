@@ -2,6 +2,8 @@ import { ApiError } from './data.ts';
 
 export const SEO_BUCKET_SIZE = 1000;
 export const SEO_BROWSE_SIZE = 80;
+// The bucket is a primary key; this existence check visits at most one row.
+export const SEO_BUCKET_EXISTS_SQL='/* qamous-read:128 */ SELECT 1 FROM seo_sitemap_buckets WHERE bucket=?';
 
 export function seoBucket(value: string): number {
   if (!/^(0|[1-9]\d*)$/.test(value)) throw new ApiError(404, 'Sitemap not found');
@@ -52,7 +54,7 @@ export async function seoIndex(db: D1Database) {
 
 export async function seoShard(db: D1Database,bucket: number) {
   const start=bucket*SEO_BUCKET_SIZE;
-  const exists=await db.prepare('SELECT 1 FROM seo_sitemap_buckets WHERE bucket=?').bind(bucket).first();
+  const exists=await db.prepare(SEO_BUCKET_EXISTS_SQL).bind(bucket).first();
   if (!exists) throw new ApiError(404,'Sitemap not found');
   return (await db.prepare(SEO_SHARD_SQL).bind(start,start+SEO_BUCKET_SIZE).all()).results;
 }
