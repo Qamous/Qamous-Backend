@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Word } from "../../../typeorm/entities/word";
 import { Like, Repository } from "typeorm";
@@ -7,6 +7,8 @@ import { In } from 'typeorm';
 import { RagRequest, RagResponse } from "../../dtos/rag.dto";
 import { VectorStoreService } from "../vector-store/vector-store.service";
 import { ModelService } from "../model/model.service";
+import { SubscriptionsService } from "../../../subscriptions/services/subscriptions/subscriptions.service";
+import { Subscription } from "../../../typeorm/entities/subscription";
 
 interface CitedWord {
   id: number;
@@ -23,12 +25,24 @@ export class RagService {
     @InjectRepository(Word)
     private wordRepository: Repository<Word>,
     @InjectRepository(Definition)
-    private definitionRepository: Repository<Definition>,
     private modelService: ModelService,
     private vectorStore: VectorStoreService,
+    private subscriptionsService: SubscriptionsService
   ) {}
 
-  async processQuery(request: RagRequest): Promise<RagResponse> {
+  private readonly modelTiers = {
+    free: ['groq', 'gemini'],
+    premium: ['groq-3', 'gemini-pro', 'gpt4', 'mistral']
+  };
+
+  async processQuery(request: RagRequest, userId: number): Promise<RagResponse> {
+    const subscription: Subscription = await this.subscriptionsService.getActiveSubscription(userId);
+    const tier: 'premium' | 'free' = subscription?.status === 'active' ? 'premium' : 'free';
+
+    if (!this.modelTiers[tier].includes(request.model)) {
+      throw new ForbiddenException(`Model ${request.model} requires premium subscription`);
+    }
+
     // 1. Extract words from the query
     const words: string[] = this.extractWords(request.query);
 
