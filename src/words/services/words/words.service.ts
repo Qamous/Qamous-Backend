@@ -255,4 +255,15 @@ export class WordsService {
   async findByUserId(userId: number): Promise<Word[]> {
     return this.wordsRepository.find({ where: { userId } });
   }
+
+  /**
+   * This updates the user id of all words posted by a specific user
+   *
+   * @param {number} oldUserId - the current user id
+   * @param {number} newUserId - the new user id
+   * @returns {Promise<UpdateResult>} - the update result
+   */
+  async updateUserId(oldUserId: number, newUserId: number): Promise<UpdateResult> {
+    return await this.wordsRepository.update({ userId: oldUserId }, { userId: newUserId });
+  }
 }
