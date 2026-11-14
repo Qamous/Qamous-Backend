@@ -15,7 +15,7 @@
   "dependencies": {
     "@noble/hashes": "2.4.0",
     "bcryptjs": "2.4.3",
-    "hono": "4.13.13",
+    "hono": "4.13.18",
     "nodemailer": "10.2.1"
   },
   "devDependencies": {

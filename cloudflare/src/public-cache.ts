@@ -42,7 +42,7 @@ export class QamousPublicCache extends DurableObject<Env> {
         put:value=>{if((this.freshMetadata.get(key)?.revision||0)>value.revision)return;this.freshMetadata.delete(key);this.freshMetadata.set(key,value);while(this.freshMetadata.size>8192)this.freshMetadata.delete(this.freshMetadata.keys().next().value!);},
       },typeof this.ctx.waitUntil==='function'?work=>this.ctx.waitUntil(work.catch(()=>{
         console.log(JSON.stringify({event:'public_cache_refresh_failed',resource:key.split(':')[0]}));
-      })):undefined);
+      })):undefined,publicFreshMs(key)>=24*60*60_000);
     this.caches.set(key,cache);this.pruneCaches();return cache;
   }
   private pruneCaches() {

@@ -11,6 +11,9 @@ export const READ_BUDGET_POLICY=Object.freeze({
   ledgerSettledRows:5,ledgerRecoveredRows:7,
   ledgerPublicRows:54_000,ledgerTotalRows:64_000,ledgerImportRows:32_000,
   cachePublicRows:16_000,cacheTotalRows:20_000,
+  // Ledger and cache allocations share their existing 84k partition. The
+  // separate 12k auxiliary pool and 4k startup margin remain untouched.
+  ledgerCacheRows:84_000,
   auxiliaryTotalRows:12_000,auxiliaryRuntimeRows:3_000,auxiliaryImportRows:6_000,auxiliaryRevisionRows:3_000,
 });
 type SqlValue=string|number|null;
@@ -19,6 +22,7 @@ interface Store {sql:SqlStore;transactionSync<T>(callback:()=>T):T;}
 interface Lease extends Record<string,SqlValue> {id:string;day:string;tier:ReadTier;route:string;reserved:number;started:number;minute:number;status:string;actual:number|null;storageRefund:number|null;queryKey:string|null;}
 interface Route {route:string;tier:ReadTier;charged:number;measured:number;queries:number;writes:number;denied:number;unknown:number;}
 interface TierRows {public:number;import:number;essential:number;unknown:number;}
+interface CacheRows {charged:number;essential:number;}
 interface CostCircuit {route:string;tier:ReadTier;reserved:number;actual:number;}
 interface State {day:string;charged:number;measured:number;baseline:number;denied:number;tripped:string|null;alerted:number;operations:number;ledgerRows:number;tierLedgerRows?:TierRows;unresolved:number;minutes:Record<string,{charged:number;essential:number}>;routes:Record<string,Route>;active:Record<string,{tier:ReadTier;started:number}>;cleanupCursor:string;costCircuits?:Record<string,CostCircuit>;}
 export interface Reservation {id:string;route:string;tier:ReadTier;rows:number;queryKey?:string;}
@@ -45,7 +49,10 @@ export class ReadBudgetLedger {
     // Nullable for already admitted/legacy callers. The extra column does not
     // add per-query row writes or change any existing allocation/refund.
     if(!sql.exec('PRAGMA table_info(read_budget_compact_leases)').toArray().some(column=>column.name==='queryKey'))sql.exec('ALTER TABLE read_budget_compact_leases ADD COLUMN queryKey TEXT');
-    sql.exec('CREATE TABLE IF NOT EXISTS public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL) WITHOUT ROWID');
+    sql.exec('CREATE TABLE IF NOT EXISTS public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL,essential INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID');
+    // Existing allocations remain fully charged and conservatively public.
+    // Only newly admitted essential work can spend its reserved cache share.
+    if(!sql.exec('PRAGMA table_info(public_cache_write_days)').toArray().some(column=>column.name==='essential'))sql.exec('ALTER TABLE public_cache_write_days ADD COLUMN essential INTEGER NOT NULL DEFAULT 0');
     sql.exec('CREATE TABLE IF NOT EXISTS auxiliary_write_days(day TEXT PRIMARY KEY,state TEXT NOT NULL) WITHOUT ROWID');
     sql.exec('CREATE TABLE IF NOT EXISTS revision_write_holds(id TEXT PRIMARY KEY,day TEXT NOT NULL,cost INTEGER NOT NULL) WITHOUT ROWID');
     // Legacy tables remain read-only evidence. Copy each existing day exactly
@@ -144,15 +151,39 @@ export class ReadBudgetLedger {
   reservePublicCacheWrites(cost:number,tier:'public'|'essential',now=Date.now()):boolean {
     if(!validInteger(cost)||cost<1||cost>512||!['public','essential'].includes(tier))return false;
     return this.store.transactionSync(()=>{
-      const sql=this.store.sql,day=dayAt(now),current=sql.exec('SELECT charged FROM public_cache_write_days WHERE day=?',day).toArray()[0];
+      const sql=this.store.sql,day=dayAt(now),current=this.cacheRows(day);
       // This new pool needs an explicit initial-day baseline. It cannot assume
       // earlier cache writers used zero rows simply because code was deployed.
-      if(!current&&!sql.exec('SELECT day FROM public_cache_write_days WHERE day<? ORDER BY day DESC LIMIT 1',day).toArray().length)return false;
-      const charged=Number(current?.charged||0),ceiling=tier==='essential'?READ_BUDGET_POLICY.cacheTotalRows:READ_BUDGET_POLICY.cachePublicRows,allocation=cost+1;
+      if(!current)return false;
+      const charged=current.charged,ceiling=tier==='essential'?READ_BUDGET_POLICY.cacheTotalRows:READ_BUDGET_POLICY.cachePublicRows,allocation=cost+1;
       if(charged+allocation>ceiling)return false;
-      sql.exec('INSERT INTO public_cache_write_days(day,charged) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET charged=excluded.charged',day,charged+allocation);
+      const next={charged:charged+allocation,essential:current.essential+(tier==='essential'?allocation:0)};
+      if(!this.storageFits(this.current(now,false),next,false))return false;
+      sql.exec('INSERT INTO public_cache_write_days(day,charged,essential) VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET charged=excluded.charged,essential=excluded.essential',day,next.charged,next.essential);
       return true;
     });
+  }
+  private cacheRows(day:string):CacheRows|null {
+    const sql=this.store.sql,row=sql.exec('SELECT charged,essential FROM public_cache_write_days WHERE day=?',day).toArray()[0];
+    if(row)return {charged:Number(row.charged),essential:Number(row.essential)};
+    // A known previous baseline permits a new UTC day to start at zero. A
+    // missing first baseline must never be interpreted as unused capacity.
+    return sql.exec('SELECT day FROM public_cache_write_days WHERE day<? ORDER BY day DESC LIMIT 1',day).toArray().length?{charged:0,essential:0}:null;
+  }
+  private storageLimits(cache:CacheRows|null) {
+    if(!cache)return {ledger:READ_BUDGET_POLICY.ledgerTotalRows,public:READ_BUDGET_POLICY.ledgerPublicRows};
+    const essentialCache=Math.min(Math.max(0,READ_BUDGET_POLICY.cacheTotalRows-cache.charged),
+      Math.max(0,READ_BUDGET_POLICY.cacheTotalRows-READ_BUDGET_POLICY.cachePublicRows-cache.essential));
+    const ledger=READ_BUDGET_POLICY.ledgerCacheRows-cache.charged-essentialCache;
+    return {ledger,public:ledger-(READ_BUDGET_POLICY.ledgerTotalRows-READ_BUDGET_POLICY.ledgerPublicRows)};
+  }
+  private storageFits(state:State|null,cache:CacheRows|null,publicAdmission:boolean):boolean {
+    const limits=this.storageLimits(cache);
+    if(!state)return READ_BUDGET_POLICY.ledgerTotalRows<=limits.ledger;
+    const tiers=state.tierLedgerRows!,nonessential=tiers.public+tiers.import+tiers.unknown;
+    // Cache admissions preserve the full ledger reserve for account actions.
+    // Existing ledger admissions already carry all outstanding lifecycle cost.
+    return state.ledgerRows<=limits.ledger&&((cache||publicAdmission)?nonessential<=limits.public:true);
   }
   private classifyTierRows(state:State):TierRows {
     const counts={public:0,import:0,essential:0},legacy={public:0,import:0,essential:0};
@@ -239,8 +270,8 @@ export class ReadBudgetLedger {
       if(state.tripped)return deny('cost_circuit_open',retry);
       if(state.costCircuits?.[costKey(input.queryKey,input.tier,route)])return deny('query_cost_circuit_open',retry);
       const allocation=READ_BUDGET_POLICY.ledgerRowsPerOperation,tiers=state.tierLedgerRows!;
-      if(state.ledgerRows+allocation>READ_BUDGET_POLICY.ledgerTotalRows
-        ||input.tier!=='essential'&&tiers.public+tiers.import+tiers.unknown+allocation>READ_BUDGET_POLICY.ledgerPublicRows
+      const proposed={...state,ledgerRows:state.ledgerRows+allocation,tierLedgerRows:{...tiers,[input.tier]:tiers[input.tier]+allocation}};
+      if(!this.storageFits(proposed,this.cacheRows(day),input.tier!=='essential')
         ||input.tier==='import'&&tiers.import+tiers.unknown+allocation>READ_BUDGET_POLICY.ledgerImportRows)return deny('do_storage_budget',retry);
       const ceiling=input.tier==='essential'?READ_BUDGET_POLICY.totalRows:input.tier==='import'?READ_BUDGET_POLICY.importStopRows:READ_BUDGET_POLICY.publicRows;
       if(state.charged+input.rows>ceiling)return deny(input.tier==='import'?'import_paused':'daily_budget',retry);
@@ -268,7 +299,8 @@ export class ReadBudgetLedger {
       let current:State|null=null;
       if(lease.day!==dayAt(now)) {
         current=this.current(now,false);
-        if(!current||current.ledgerRows+READ_BUDGET_POLICY.ledgerRowsPerOperation>READ_BUDGET_POLICY.ledgerTotalRows){this.deny(dayAt(now),lease.route,lease.tier,'do_storage_budget',60,current);return {settled:false,charged:lease.reserved,reason:'do_storage_budget'};}
+        const proposed=current?{...current,ledgerRows:current.ledgerRows+READ_BUDGET_POLICY.ledgerRowsPerOperation}:null;
+        if(!current||!this.storageFits(proposed,this.cacheRows(dayAt(now)),false)){this.deny(dayAt(now),lease.route,lease.tier,'do_storage_budget',60,current);return {settled:false,charged:lease.reserved,reason:'do_storage_budget'};}
         current.ledgerRows+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.tierLedgerRows!.essential+=READ_BUDGET_POLICY.ledgerRowsPerOperation;current.operations++;
       }
       const entry=this.route(state,lease.route,lease.tier);delete state.active[id];
@@ -332,8 +364,9 @@ export class ReadBudgetLedger {
   }
   status(now=Date.now()) {
     const state=this.current(now,false),{minutes:_minutes,routes:_routes,active:_active,cleanupCursor:_cursor,costCircuits:_circuits,...usage}=state||{};
-    const cache=this.store.sql.exec('SELECT charged FROM public_cache_write_days WHERE day=?',dayAt(now)).toArray()[0];
+    const cache=this.store.sql.exec('SELECT charged,essential FROM public_cache_write_days WHERE day=?',dayAt(now)).toArray()[0];
+    const limits=this.storageLimits(this.cacheRows(dayAt(now))),tiers=state?.tierLedgerRows;
     const auxiliary=this.store.sql.exec('SELECT state FROM auxiliary_write_days WHERE day=?',dayAt(now)).toArray()[0];
-    return {day:dayAt(now),initialized:!!state,policy:READ_BUDGET_POLICY,usage:state?{...usage,denied:state.denied+(this.deniedDay===state.day?this.deniedCount:0)}:null,costCircuits:state?.costCircuits||{},publicCacheWrites:{initialized:!!cache,charged:cache?Number(cache.charged):null},auxiliaryWrites:auxiliary?{initialized:true,...JSON.parse(String(auxiliary.state))}:{initialized:false,charged:null},denialAccounting:'Current-process counts plus legacy persisted counts; bounded events are emitted without storage writes.',active:state?Object.values(state.active).filter(a=>a.started>=now-READ_BUDGET_POLICY.leaseMs).length:0,routes:state?Object.values(state.routes).sort((a,b)=>b.charged-a.charged).slice(0,100):[]};
+    return {day:dayAt(now),initialized:!!state,policy:READ_BUDGET_POLICY,usage:state?{...usage,denied:state.denied+(this.deniedDay===state.day?this.deniedCount:0)}:null,costCircuits:state?.costCircuits||{},publicCacheWrites:{initialized:!!cache,charged:cache?Number(cache.charged):null,essential:cache?Number(cache.essential):null},storageBudget:{sharedRows:READ_BUDGET_POLICY.ledgerCacheRows,ledgerCeiling:limits.ledger,publicLedgerCeiling:limits.public,publicRowsAvailable:state&&tiers?Math.max(0,Math.min(limits.ledger-state.ledgerRows,limits.public-tiers.public-tiers.import-tiers.unknown)):0},auxiliaryWrites:auxiliary?{initialized:true,...JSON.parse(String(auxiliary.state))}:{initialized:false,charged:null},denialAccounting:'Current-process counts plus legacy persisted counts; bounded events are emitted without storage writes.',active:state?Object.values(state.active).filter(a=>a.started>=now-READ_BUDGET_POLICY.leaseMs).length:0,routes:state?Object.values(state.routes).sort((a,b)=>b.charged-a.charged).slice(0,100):[]};
   }
 }

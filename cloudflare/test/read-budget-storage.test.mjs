@@ -22,6 +22,33 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
         const sql=this.ctx.storage.sql,ledger=this.ledger;
         const change=(day,mutate)=>{const state=JSON.parse(sql.exec('SELECT state FROM read_budget_compact_days WHERE day=?',day).one().state);mutate(state);sql.exec('UPDATE read_budget_compact_days SET state=? WHERE day=?',JSON.stringify(state),day);};
         const claim=(id,tier='public')=>({id:'request-'+id,rows:1,route:'/measured',tier});
+        if(scenario==='cache-schema-upgrade') {
+          sql.exec('DROP TABLE public_cache_write_days');
+          sql.exec('CREATE TABLE public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL) WITHOUT ROWID');
+          sql.exec('INSERT INTO public_cache_write_days(day,charged) VALUES(?,15001)',day);
+          for(let n=0;n<1000;n++)sql.exec('INSERT INTO public_cache_write_days(day,charged) VALUES(?,1)',new Date(Date.parse('2023-01-01')+n*86400000).toISOString().slice(0,10));
+          const before=this.writes,upgraded=new ReadBudgetLedger(this.store,{day,rows:0},()=>{}),migrationWrites=this.writes-before;
+          const status=upgraded.status(now),restartBefore=this.writes;
+          new ReadBudgetLedger(this.store,{day,rows:0},()=>{});
+          return {status,migrationWrites,restartWrites:this.writes-restartBefore};
+        }
+        if(scenario==='shared-live-state'||scenario==='shared-cap') {
+          const live=scenario==='shared-live-state';
+          change(day,state=>{state.ledgerRows=live?54055:69992;state.tierLedgerRows={public:live?53995:60000,essential:live?60:9992,import:0,unknown:0};});
+          sql.exec('INSERT INTO public_cache_write_days(day,charged,essential) VALUES(?,?,0)',day,live?3662:10000);
+          const before=this.writes;
+          if(!live)for(let n=0;n<8;n++)if(!ledger.reservePublicCacheWrites(499,'essential',now))throw Error('Reserved mutation cache writes refused');
+          const admitted=ledger.reserve(claim('shared',live?'public':'essential'),now);
+          if(!admitted.allowed)throw Error('Shared ledger admission refused');
+          if(live)ledger.settle(admitted.id,0,0,now);
+          const writes=this.writes-before,status=ledger.status(now),capped=this.writes;
+          if(!live)for(let n=0;n<100;n++){
+            if(ledger.reserve(claim('denied-'+n,'essential'),now).allowed)throw Error('Shared ledger cap bypass');
+            if(ledger.reservePublicCacheWrites(1,'essential',now))throw Error('Shared cache cap bypass');
+          }
+          const restarted=new ReadBudgetLedger(this.store,{day,rows:0},()=>{});
+          return {scenario,writes,status,denialWrites:this.writes-capped,restarted:restarted.status(now)};
+        }
         if(scenario==='schema-upgrade') {
           sql.exec('DROP TABLE read_budget_compact_leases');
           sql.exec('CREATE TABLE read_budget_compact_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER) WITHOUT ROWID');
@@ -137,4 +164,21 @@ test('real SQLite Durable Object row-write metering stays inside the lifecycle a
   assert.equal(cache.writes,cache.admissions+1,'one row per admission plus the initial counter row');
   assert.equal(cache.charged,cache.writes+cache.admissions,'the pool reserves every counter write and every promised cache-row write');
   assert.equal(cache.denialWrites,0);assert.equal(cache.d1Operations,0);
+  const cacheUpgradeResponse=await mf.dispatchFetch('https://local/cache-schema-upgrade');assert.equal(cacheUpgradeResponse.status,200,await cacheUpgradeResponse.clone().text());
+  const cacheUpgrade=await cacheUpgradeResponse.json();
+  assert.equal(cacheUpgrade.status.publicCacheWrites.charged,15001);assert.equal(cacheUpgrade.status.publicCacheWrites.essential,0);
+  assert.ok(cacheUpgrade.migrationWrites<=1,'adding the default counter must not rewrite 1000 historical rows');assert.equal(cacheUpgrade.restartWrites,0);
+  for(const scenario of ['shared-live-state','shared-cap']){
+    const reply=await mf.dispatchFetch('https://local/'+scenario);assert.equal(reply.status,200,await reply.clone().text());const shared=await reply.json();t.diagnostic(JSON.stringify(shared));
+    assert.equal(shared.denialWrites,0);
+    assert.deepEqual(shared.restarted.usage,shared.status.usage);
+    assert.deepEqual(shared.restarted.publicCacheWrites,shared.status.publicCacheWrites);
+    if(scenario==='shared-live-state'){
+      assert.ok(shared.writes<=5,'borrowing capacity adds no writes to a known query lifecycle');
+      assert.equal(shared.status.usage.ledgerRows,54060);assert.equal(shared.status.publicCacheWrites.charged,3662);
+    }else{
+      assert.equal(shared.status.usage.ledgerRows+shared.status.publicCacheWrites.charged,84000);
+      assert.ok(shared.writes<=8+4000,'every physical write stays within its already durable allocation');
+    }
+  }
 });
