@@ -13,6 +13,17 @@ Production API: https://api.qamous.org. Public website: https://qamous.org.
 
 See SECURITY.md for runtime protections and the edge policy.
 
+## Daily storage allocation
+
+The read ledger and public cache share their existing 84,000-row write partition.
+Idle cache capacity can fund query accounting, with 10,000 ledger rows and 4,000
+cache rows protected for essential account work. The 12,000-row auxiliary pool,
+4,000-row startup margin, D1 read ceilings, import limits and rate limits remain
+unchanged. The authenticated budget status exposes the effective ceilings under
+`storageBudget`; the old policy values describe the baseline partition.
+The upgrade preserves every previous charge and adds a counter for newly
+reserved essential cache writes. It does not reset a day's accounting.
+
 ## Search discovery
 
 Apply `migrations/0008_seo_discovery.sql` before deploying the SEO API and
@@ -23,7 +34,10 @@ eligible definitions. `/seo/browse/:language` uses an indexed keyset cursor to
 expose every eligible word through ordinary alphabetical links without static
 word files. The API's SEO JSON remains `noindex`; the web Worker renders HTML
 and XML. Public word payloads, the sitemap index and word sitemap shards remain
-fresh for 24 hours while their scoped content revision is unchanged. Every API
+fresh for 24 hours while their scoped content revision is unchanged. Country
+metadata and related-word lists use the same interval. Expired daily deadlines
+are renewed durably even when the payload is unchanged, so object restarts do
+not repeatedly reload the same content. Every API
 read checks that revision; edits and moderation invalidate it immediately.
 Other public payloads retain their 15-minute refresh interval, and the web
 Worker's HTML cache lasts 60 seconds.

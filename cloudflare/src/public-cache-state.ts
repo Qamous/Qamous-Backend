@@ -30,7 +30,8 @@ export class PublicCacheState {
   private memoryChanged?:(bytes:number)=>void;
   private freshness?:PublicFreshnessMemo;
   private background?:(work:Promise<unknown>)=>void;
-  constructor(store: PublicCacheStore,clock: () => number = Date.now,memoryChanged?:(bytes:number)=>void,freshness?:PublicFreshnessMemo,background?:(work:Promise<unknown>)=>void) {this.store=store;this.clock=clock;this.memoryChanged=memoryChanged;this.freshness=freshness;this.background=background;}
+  private durableFreshness:boolean;
+  constructor(store: PublicCacheStore,clock: () => number = Date.now,memoryChanged?:(bytes:number)=>void,freshness?:PublicFreshnessMemo,background?:(work:Promise<unknown>)=>void,durableFreshness=false) {this.store=store;this.clock=clock;this.memoryChanged=memoryChanged;this.freshness=freshness;this.background=background;this.durableFreshness=durableFreshness;}
   private async digest(json:string):Promise<string> {return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json)))].map(value=>value.toString(16).padStart(2,'0')).join('');}
   releaseMemory():void {this.memory=undefined;this.durable=undefined;}
   private remember(entry:StoredPublicCacheEntry) {
@@ -59,9 +60,11 @@ export class PublicCacheState {
         const record:CacheRecord={revision,token:'',freshUntil:now+freshMs,staleUntil:now+staleMs,parts:1};
         const entry={record,json};
         let stored=true;
-        // Unchanged content needs no chunk or metadata rewrite on every TTL.
-        // Renew the durable stale window only as it approaches its end.
-        if(!(previous&&!previous.legacy&&previous.record.revision===revision&&previous.json===json&&previous.record.staleUntil>now+freshMs)) {
+        // Short-lived feeds can use the bounded freshness memo to avoid repeat
+        // writes. Long-lived resources must persist an expired fresh deadline:
+        // losing a memo on eviction/restart must not repeat the same D1 read.
+        if(!(previous&&!previous.legacy&&previous.record.revision===revision&&previous.json===json&&previous.record.staleUntil>now+freshMs
+          &&(!this.durableFreshness||previous.record.freshUntil>now))) {
           stored=await this.store.writeEntry(entry,tier);
           if(stored)this.durable=entry;
         } else this.durable=previous;

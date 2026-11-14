@@ -50,6 +50,41 @@ test('unchanged word pages avoid repeated D1 refreshes while edits still invalid
   assert.equal(publicFreshMs('feed:0'),15*60_000);
 });
 
+test('country and related-word caches survive a day of object churn while mutations stay authoritative',async()=>{
+  for(const key of ['countries','related:EG:ar','related:LB:franco']){
+    let now=0,loads=0;const store=storage(),fresh=publicFreshMs(key);
+    const load=async()=>{loads++;return [{word:'Original'}];};
+    await new PublicCacheState(store,()=>now).get(1,fresh,PUBLIC_STALE_MS,load);
+    for(const hour of [1,4,12,23]){
+      now=hour*3600_000;
+      assert.equal((await new PublicCacheState(store,()=>now).get(1,fresh,PUBLIC_STALE_MS,load)).state,'hit');
+    }
+    assert.equal(loads,1,key+' must not reload on each object recreation');
+    assert.equal((await new PublicCacheState(store,()=>now).get(2,fresh,PUBLIC_STALE_MS,async()=>[{word:'Edited'}])).value[0].word,'Edited');
+    await assert.rejects(new PublicCacheState(store,()=>now).get(3,fresh,PUBLIC_STALE_MS,async()=>{throw Error('new revision unavailable');}),/new revision unavailable/);
+  }
+});
+
+test('a long-lived cache durably upgrades and renews an unchanged short-lived entry after restart',async()=>{
+  let now=0,entry,writes=0,loads=0;
+  const store={async readEntry(){return structuredClone(entry);},async writeEntry(value){writes++;entry=structuredClone(value);return true;}};
+  const load=async()=>{loads++;return [{countryCode:'EG'}];};
+  const cache=()=>new PublicCacheState(store,()=>now,undefined,undefined,undefined,true);
+  await cache().get(1,15*60_000,PUBLIC_STALE_MS,load);
+  now=3600_000;
+  await cache().get(1,publicFreshMs('countries'),PUBLIC_STALE_MS,load);
+  assert.equal(writes,2,'an old expired deadline is replaced even when the payload is unchanged');
+  now+=23*3600_000;
+  assert.equal((await cache().get(1,publicFreshMs('countries'),PUBLIC_STALE_MS,load)).state,'hit');
+  assert.equal(loads,2);
+  now+=2*3600_000;
+  await cache().get(1,publicFreshMs('countries'),PUBLIC_STALE_MS,load);
+  assert.equal(writes,3,'a later daily refresh also persists its renewed deadline');
+  now+=20*3600_000;
+  assert.equal((await cache().get(1,publicFreshMs('countries'),PUBLIC_STALE_MS,load)).state,'hit');
+  assert.equal(loads,3);
+});
+
 test('an older in-flight load cannot replace a newer generation',async()=>{
   const store=storage(),cache=new PublicCacheState(store),gate=deferred();
   const before=cache.get(1,1000,86400_000,async()=>{await gate.promise;return {word:'old'};});

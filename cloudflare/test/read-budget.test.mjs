@@ -49,6 +49,66 @@ function changeState(f,day,change) {
   const state=JSON.parse(f.db.prepare('SELECT state FROM read_budget_compact_days WHERE day=?').get(day).state);
   change(state);f.db.prepare('UPDATE read_budget_compact_days SET state=? WHERE day=?').run(JSON.stringify(state),day);
 }
+
+function cacheUsage(f,charged,essential=0) {
+  f.db.prepare('INSERT INTO public_cache_write_days(day,charged,essential) VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET charged=excluded.charged,essential=excluded.essential').run(day,charged,essential);
+}
+
+test('the live public accounting cap can borrow unused cache capacity without resetting spent rows',()=>{
+  const f=fixture(2_749_910);
+  try {
+    changeState(f,day,state=>{state.ledgerRows=54_055;state.tierLedgerRows={public:53_995,essential:60,import:0,unknown:0};state.operations=10_811;});
+    assert.equal(f.ledger.reserve(claim(128),start).reason,'do_storage_budget','an unknown cache baseline cannot create headroom');
+    cacheUsage(f,3662);
+    const before=f.ledger.status(start);assert.equal(before.storageBudget.publicRowsAvailable,12_343);
+    const admitted=f.ledger.reserve(claim(128),start);assert.ok(admitted.allowed);
+    f.ledger.settle(admitted.id,7,0,start);
+    const restarted=new ReadBudgetLedger(f.store,{day,rows:0}),after=restarted.status(start);
+    assert.equal(after.usage.charged,2_749_917);assert.equal(after.usage.ledgerRows,54_060);
+    assert.equal(after.usage.tierLedgerRows.public,54_000);assert.equal(after.publicCacheWrites.charged,3662);
+    assert.equal(after.storageBudget.publicRowsAvailable,before.storageBudget.publicRowsAvailable-5);
+    cacheUsage(f,20_000);
+    assert.equal(restarted.reserve(claim(1),start).reason,'do_storage_budget','spent cache capacity cannot also fund the ledger');
+  }finally{f.db.close();}
+});
+
+test('shared storage preserves essential ledger and cache reservations in either admission order',()=>{
+  for(const cacheFirst of [true,false]){
+    const f=fixture();
+    try{
+      changeState(f,day,state=>{state.ledgerRows=69_992;state.tierLedgerRows={public:60_000,essential:9992,import:0,unknown:0};});
+      cacheUsage(f,10_000);
+      assert.equal(f.ledger.reserve(claim(1),start).reason,'do_storage_budget');
+      assert.equal(f.ledger.reservePublicCacheWrites(1,'public',start),false);
+      const cache=()=>{for(let n=0;n<8;n++)assert.equal(f.ledger.reservePublicCacheWrites(499,'essential',start),true);};
+      const essential=()=>assert.equal(f.ledger.reserve(claim(1,'essential'),start).allowed,true);
+      if(cacheFirst){cache();essential();}else{essential();cache();}
+      const restarted=new ReadBudgetLedger(f.store,{day,rows:0}),status=restarted.status(start);
+      assert.equal(status.usage.ledgerRows+status.publicCacheWrites.charged,84_000);
+      assert.equal(status.publicCacheWrites.essential,4000);
+      assert.equal(restarted.reserve(claim(1,'essential'),start).reason,'do_storage_budget');
+      assert.equal(restarted.reservePublicCacheWrites(1,'essential',start),false);
+      assert.equal(READ_BUDGET_POLICY.ledgerCacheRows+READ_BUDGET_POLICY.auxiliaryTotalRows,96_000);
+    }finally{f.db.close();}
+  }
+});
+
+test('sharing does not expand import allowance or forget legacy cache charges',()=>{
+  const f=fixture();
+  try{
+    f.db.exec('DROP TABLE public_cache_write_days; CREATE TABLE public_cache_write_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL) WITHOUT ROWID');
+    f.db.prepare('INSERT INTO public_cache_write_days(day,charged) VALUES(?,?)').run(day,15_001);
+    const upgraded=new ReadBudgetLedger(f.store,{day,rows:0,cacheDay:day,cacheRows:0});
+    assert.equal(upgraded.status(start).publicCacheWrites.charged,15_001);
+    assert.equal(upgraded.status(start).publicCacheWrites.essential,0);
+    changeState(f,day,state=>{state.ledgerRows=31_995;state.tierLedgerRows={public:0,essential:0,import:31_995,unknown:0};});
+    assert.equal(upgraded.reserve(claim(1,'import'),start).reason,'do_storage_budget');
+    assert.equal(upgraded.reserve(claim(1,'public'),start).allowed,true);
+    const tomorrow=upgraded.status(start+86400000);
+    assert.equal(tomorrow.storageBudget.publicLedgerCeiling,70_000);
+    assert.equal(tomorrow.usage.ledgerRows,0);
+  }finally{f.db.close();}
+});
 function legacySchema(f) {
   f.db.exec(`CREATE TABLE read_budget_days(day TEXT PRIMARY KEY,charged INTEGER NOT NULL,measured INTEGER NOT NULL DEFAULT 0,baseline INTEGER NOT NULL DEFAULT 0,denied INTEGER NOT NULL DEFAULT 0,tripped TEXT,alerted INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE read_budget_leases(id TEXT PRIMARY KEY,day TEXT NOT NULL,tier TEXT NOT NULL,route TEXT NOT NULL,reserved INTEGER NOT NULL,started INTEGER NOT NULL,minute INTEGER NOT NULL,status TEXT NOT NULL,actual INTEGER);
