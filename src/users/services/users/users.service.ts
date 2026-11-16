@@ -99,27 +99,8 @@ export class UsersService {
     }
 
     // Set all of the user's posted words and definitions to user with id=7
-    const words = await this.wordsService.findByUserId(id);
-    const definitions = await this.definitionsService.findByUserId(id);
-
-    for (const word of words) {
-      word.userId = 7;
-      const updateWordDto: UpdateWordDto = {
-        FrancoArabicWord: word.francoArabicWord,
-        arabicWord: word.arabicWord,
-        userId: 7,
-      };
-      await this.wordsService.updateWord(user, word.id, updateWordDto);
-    }
-
-    for (const definition of definitions) {
-      definition.userId = 7;
-      await this.definitionsService.updateDefinitionById(
-        user,
-        definition.id,
-        definition,
-      );
-    }
+    await this.wordsService.updateUserId(id, 7);
+    await this.definitionsService.updateUserId(id, 7);
 
     // Delete the user
     return await this.usersRepository.delete(id);

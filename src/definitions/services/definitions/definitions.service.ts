@@ -314,4 +314,15 @@ export class DefinitionsService {
     });
     return count === 0;
   }
+
+  /**
+   * This updates the user id of all definitions posted by a specific user
+   *
+   * @param {number} oldUserId - the current user id
+   * @param {number} newUserId - the new user id
+   * @returns {Promise<UpdateResult>} - the update result
+   */
+  async updateUserId(oldUserId: number, newUserId: number): Promise<UpdateResult> {
+    return await this.definitionsRepository.update({ userId: oldUserId }, { userId: newUserId });
+  }
 }
