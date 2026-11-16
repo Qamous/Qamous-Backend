@@ -1,4 +1,4 @@
-export type AiModel = 'groq' | 'gemini' | 'gpt4' | 'mistral';
+export type AiModel = 'groq' | 'gemini' | 'groq-3'| 'gemini-pro' | 'gpt4' | 'mistral';
 
 export class RagRequest {
   query: string;

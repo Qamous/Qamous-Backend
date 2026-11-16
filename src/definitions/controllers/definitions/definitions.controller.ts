@@ -16,7 +16,7 @@ import { CreateDefinitionDto } from '../../dtos/create-definition.dto';
 import { UpdateDefinitionDto } from '../../dtos/update-definition.dto';
 import { DeleteResult, UpdateResult } from 'typeorm';
 import { Throttle } from '@nestjs/throttler';
-import { AuthenticatedGuard } from '../../../utils/local.guard';
+import { AuthenticatedGuard } from '../../../utils/guards/local.guard';
 import { RequestType } from 'express-serve-static-core';
 import { Country } from '../../../typeorm/entities/country';
 

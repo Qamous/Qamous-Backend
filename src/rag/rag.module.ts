@@ -6,10 +6,12 @@ import { Word } from "../typeorm/entities/word";
 import { Definition } from "../typeorm/entities/definition";
 import { ModelService } from "./services/model/model.service";
 import { VectorStoreService } from "./services/vector-store/vector-store.service";
+import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Word, Definition]),
+    SubscriptionsModule
   ],
   controllers: [RagController],
   providers: [RagService, ModelService, VectorStoreService]

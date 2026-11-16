@@ -12,6 +12,15 @@ import { Word } from './word';
 
 @Entity({ name: 'users' })
 export class User {
+  @ManyToOne(() => Country)
+  country: Country;
+
+  @OneToMany(() => Definition, (definition) => definition.user)
+  definitions: Definition[];
+
+  @OneToMany(() => Word, (word) => word.user)
+  words: Word[];
+
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
@@ -51,12 +60,6 @@ export class User {
   @Column()
   createdAt: Date;
 
-  @ManyToOne(() => Country)
-  country: Country;
-
-  @OneToMany(() => Definition, (definition) => definition.user)
-  definitions: Definition[];
-
-  @OneToMany(() => Word, (word) => word.user)
-  words: Word[];
+  @Column({ nullable: true })
+  stripeCustomerId: string;
 }
